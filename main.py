@@ -162,6 +162,10 @@ class SGDGamePlugin(Star):
             if result:
                 upgrade_messages.append(result)
         
+        # 如果有升级，保存玩家数据
+        if upgrade_messages:
+            self.save_players()
+        
         status_text = f"""📊 指挥官状态
 
 👥 克隆体：{len(player['clones'])}/{player['max_clones']}个"""
