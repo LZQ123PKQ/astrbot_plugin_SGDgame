@@ -140,19 +140,13 @@ class SGDGamePlugin(Star):
 
     @filter.command("游戏状态")
     async def player_status(self, event: AstrMessageEvent):
-        """查看玩家状态 - 保存挖矿进度但不停止"""
+        """查看玩家状态"""
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
         
         # 只结算跃迁（跃迁完成后需要更新位置和状态）
         # 挖矿、战斗、制造不应该在这里结算，它们需要手动停止
         self.settle_warp(player)
-        
-        # 保存挖矿进度到仓库（不停止挖矿）
-        mining_progress = ""
-        if player['mining']:
-            mining_progress = self.save_mining_progress(player)
-            self.save_players()
         
         status_text = f"""📊 指挥官状态
 
@@ -169,7 +163,7 @@ class SGDGamePlugin(Star):
         if player['mining']:
             mining = player['mining']
             duration = time.time() - mining['start_time']
-            status_text += f"\n\n⛏️ 挖矿中...\n  地点：{mining['planet']}小行星带\n  已进行：{duration/60:.1f}分钟（进度已保存）"
+            status_text += f"\n\n⛏️ 挖矿中...\n  地点：{mining['planet']}小行星带\n  已进行：{duration/60:.1f}分钟"
         if player['combat']:
             status_text += f"\n\n⚔️ 战斗中..."
         if player['learning']:
@@ -184,10 +178,6 @@ class SGDGamePlugin(Star):
         if player.get('warping'):
             warping = player['warping']
             status_text += f"\n\n🚀 跃迁中...\n  {warping['source']} → {warping['target']}"
-        
-        # 如果有挖矿进度保存信息，显示在底部
-        if mining_progress:
-            status_text += f"\n\n{mining_progress}"
         
         yield event.plain_result(status_text)
 
@@ -1085,14 +1075,15 @@ class SGDGamePlugin(Star):
     
     @filter.command("游戏资产")
     async def check_assets(self, event: AstrMessageEvent):
-        """查看资产 - 支持指定行星或显示所有行星"""
+        """查看资产 - 支持指定行星或显示所有行星（假装实时刷新挖矿进度）"""
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
         
         args = event.message_str.split()[1:]
         
-        # 结算挖矿
-        self.settle_mining(player)
+        # 假装实时刷新：保存挖矿进度到仓库（不停止挖矿）
+        if player['mining']:
+            self.save_mining_progress(player)
         
         if len(args) >= 1:
             # 指定了行星
@@ -1221,12 +1212,13 @@ class SGDGamePlugin(Star):
 
     @filter.command("游戏装载")
     async def load_cargo(self, event: AstrMessageEvent):
-        """批量装载货物到运输船 - 支持自动处理超载"""
+        """批量装载货物到运输船 - 支持自动处理超载（假装实时刷新挖矿进度）"""
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
         
-        # 结算挖矿，同步矿物数量
-        self.settle_mining(player)
+        # 假装实时刷新：保存挖矿进度到仓库（不停止挖矿）
+        if player['mining']:
+            self.save_mining_progress(player)
         
         args = event.message_str.split()[1:]
         if len(args) < 2:
@@ -1454,9 +1446,13 @@ class SGDGamePlugin(Star):
 
     @filter.command("游戏机库")
     async def list_hangar(self, event: AstrMessageEvent):
-        """查看机库中的舰船 - 支持指定行星，显示运输船货仓"""
+        """查看机库中的舰船 - 支持指定行星，显示运输船货仓（假装实时刷新挖矿进度）"""
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
+        
+        # 假装实时刷新：保存挖矿进度到仓库（不停止挖矿）
+        if player['mining']:
+            self.save_mining_progress(player)
         
         args = event.message_str.split()[1:]
         
