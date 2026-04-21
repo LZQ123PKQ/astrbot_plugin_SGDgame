@@ -144,11 +144,8 @@ class SGDGamePlugin(Star):
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
         
-        # 结算正在进行的活动
-        self.settle_mining(player)
-        self.settle_combat(player)
-        # 注意：学习技能不在这里结算，只在切换技能时结算
-        self.settle_manufacturing(player)
+        # 只结算跃迁（跃迁完成后需要更新位置和状态）
+        # 挖矿、战斗、制造不应该在这里结算，它们需要手动停止
         self.settle_warp(player)
         
         status_text = f"""📊 指挥官状态
@@ -164,15 +161,23 @@ class SGDGamePlugin(Star):
         
         # 显示进行中的活动
         if player['mining']:
-            status_text += f"\n\n⛏️ 挖矿中..."
+            mining = player['mining']
+            duration = time.time() - mining['start_time']
+            status_text += f"\n\n⛏️ 挖矿中...\n  地点：{mining['planet']}小行星带\n  时长：{duration/60:.1f}分钟"
         if player['combat']:
-            status_text += f"\n⚔️ 战斗中..."
+            status_text += f"\n\n⚔️ 战斗中..."
         if player['learning']:
-            status_text += f"\n📚 学习中：{player['learning']['skill']}"
+            learning = player['learning']
+            skill_name = learning['skill']
+            current_level = learning['current_level']
+            current_sp = self.get_current_sp(player, skill_name)
+            required_sp = self.get_sp_required(current_level)
+            status_text += f"\n\n📚 学习中：{skill_name} [Lv.{current_level}] {current_sp}/{required_sp}"
         if player['manufacturing']:
-            status_text += f"\n🔧 制造中：{player['manufacturing']['ship']}"
+            status_text += f"\n\n🔧 制造中：{player['manufacturing']['ship']}"
         if player.get('warping'):
-            status_text += f"\n🚀 跃迁中..."
+            warping = player['warping']
+            status_text += f"\n\n🚀 跃迁中...\n  {warping['source']} → {warping['target']}"
         
         yield event.plain_result(status_text)
 
