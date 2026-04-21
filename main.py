@@ -439,14 +439,64 @@ class SGDGamePlugin(Star):
         
         return progress
     
+    def check_skill_upgrade(self, player: Dict, skill_name: str) -> str:
+        """检查技能是否可以升级，如果可以则自动升级"""
+        current_level = player['skills'].get(skill_name, 0)
+        if current_level >= 10:
+            return ""
+        
+        current_sp = self.get_current_sp(player, skill_name)
+        sp_required = self.get_sp_required(current_level)
+        
+        if current_sp >= sp_required:
+            # 可以升级
+            levels_gained = 0
+            remaining_sp = current_sp
+            
+            while remaining_sp >= sp_required and current_level + levels_gained < 10:
+                remaining_sp -= sp_required
+                levels_gained += 1
+                if current_level + levels_gained < 10:
+                    sp_required = self.get_sp_required(current_level + levels_gained)
+            
+            # 应用升级
+            new_level = current_level + levels_gained
+            player['skills'][skill_name] = new_level
+            player['skill_progress'][skill_name] = remaining_sp
+            
+            # 更新最大克隆体数量
+            if skill_name == "克隆体同步理论":
+                player['max_clones'] = 1 + new_level
+            
+            # 如果正在学习该技能，更新学习状态中的当前等级
+            if player.get('learning') and player['learning']['skill'] == skill_name:
+                player['learning']['current_level'] = new_level
+            
+            self.save_players()
+            return f"🎉 {skill_name} 升级！Lv.{current_level} → Lv.{new_level}"
+        return ""
+    
     @filter.command("游戏技能")
     async def list_skills(self, event: AstrMessageEvent):
-        """查看技能列表 - 显示当前学习进度"""
+        """查看技能列表 - 显示当前学习进度，自动检查升级"""
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
         
         # 获取玩家当前技能数据
         skills = player.get('skills', {})
+        
+        # 检查所有已学习技能的升级情况
+        upgrade_messages = []
+        for skill_name in list(skills.keys()):
+            result = self.check_skill_upgrade(player, skill_name)
+            if result:
+                upgrade_messages.append(result)
+        
+        # 检查正在学习的技能是否升级
+        if player.get('learning'):
+            result = self.check_skill_upgrade(player, player['learning']['skill'])
+            if result:
+                upgrade_messages.append(result)
         
         def format_skill(skill_id, name):
             level = skills.get(name, 0)
@@ -470,7 +520,12 @@ class SGDGamePlugin(Star):
             required_sp = self.get_sp_required(learning_level)
             learning_info = f"\n📖 正在学习：ID:{learning_id} {learning_skill} [Lv.{learning_level}] {current_sp}/{required_sp}\n"
         
-        skills_text = f"""📚 技能系统
+        # 显示升级信息
+        upgrade_info = ""
+        if upgrade_messages:
+            upgrade_info = "\n" + "\n".join(upgrade_messages) + "\n"
+        
+        skills_text = f"""📚 技能系统{upgrade_info}
 
 技能上限：10级 | 学习方式：挂机，每分钟20技能点
 当前可控制克隆体：{player.get('max_clones', 1)}个{learning_info}
