@@ -918,6 +918,20 @@ class SGDGamePlugin(Star):
         
         return ", ".join(completed_clones) if completed_clones else ""
 
+    def settle_combat(self, player: Dict) -> str:
+        """结算战斗 - 占位符，待实现"""
+        if not player.get('combat'):
+            return ""
+        # TODO: 实现战斗结算逻辑
+        return ""
+
+    def settle_manufacturing(self, player: Dict) -> str:
+        """结算制造 - 占位符，待实现"""
+        if not player.get('manufacturing'):
+            return ""
+        # TODO: 实现制造结算逻辑
+        return ""
+
     # ========== 资产系统 ==========
     
     def format_planet_assets(self, player: Dict, planet: str) -> str:
