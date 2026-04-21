@@ -1,0 +1,6 @@
+name: astrbot_plugin_SGDgame
+display_name: 星际黎明
+desc: 太空挂机游戏 - 聊天挂机游戏，支持挖矿、刷怪、制造、技能系统
+version: v1.0.0
+author: LZQ123PKQ
+repo: https://github.com/LZQ123PKQ/astrbot_plugin_SGDgame
