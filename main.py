@@ -159,11 +159,7 @@ class SGDGamePlugin(Star):
             ship_name = ship['name'] if ship else "无"
             status_text += f"\n  {clone['name']} - {clone['status']}\n    舰船：{ship_name}\n    位置：{clone['location']}"
         
-        # 显示进行中的活动
-        if player['mining']:
-            mining = player['mining']
-            duration = time.time() - mining['start_time']
-            status_text += f"\n\n⛏️ 挖矿中...\n  地点：{mining['planet']}小行星带\n  已进行：{duration/60:.1f}分钟"
+        # 显示进行中的活动（不包括挖矿，因为克隆体状态已显示）
         if player['combat']:
             status_text += f"\n\n⚔️ 战斗中..."
         if player['learning']:
@@ -1115,7 +1111,12 @@ class SGDGamePlugin(Star):
         """获取克隆体当前驾驶的舰船信息"""
         if clone.get('ship_id') is None:
             return None
+        
+        # 获取实际所在行星（处理小行星带的情况）
         location = clone['location']
+        if '小行星带' in location:
+            location = location.replace('小行星带', '')
+        
         for ship in player['assets'].get(location, {}).get('ships', []):
             if ship['id'] == clone['ship_id']:
                 return ship
