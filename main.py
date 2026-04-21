@@ -140,13 +140,19 @@ class SGDGamePlugin(Star):
 
     @filter.command("游戏状态")
     async def player_status(self, event: AstrMessageEvent):
-        """查看玩家状态"""
+        """查看玩家状态 - 保存挖矿进度但不停止"""
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
         
         # 只结算跃迁（跃迁完成后需要更新位置和状态）
         # 挖矿、战斗、制造不应该在这里结算，它们需要手动停止
         self.settle_warp(player)
+        
+        # 保存挖矿进度到仓库（不停止挖矿）
+        mining_progress = ""
+        if player['mining']:
+            mining_progress = self.save_mining_progress(player)
+            self.save_players()
         
         status_text = f"""📊 指挥官状态
 
@@ -163,7 +169,7 @@ class SGDGamePlugin(Star):
         if player['mining']:
             mining = player['mining']
             duration = time.time() - mining['start_time']
-            status_text += f"\n\n⛏️ 挖矿中...\n  地点：{mining['planet']}小行星带\n  时长：{duration/60:.1f}分钟"
+            status_text += f"\n\n⛏️ 挖矿中...\n  地点：{mining['planet']}小行星带\n  已进行：{duration/60:.1f}分钟（进度已保存）"
         if player['combat']:
             status_text += f"\n\n⚔️ 战斗中..."
         if player['learning']:
@@ -178,6 +184,10 @@ class SGDGamePlugin(Star):
         if player.get('warping'):
             warping = player['warping']
             status_text += f"\n\n🚀 跃迁中...\n  {warping['source']} → {warping['target']}"
+        
+        # 如果有挖矿进度保存信息，显示在底部
+        if mining_progress:
+            status_text += f"\n\n{mining_progress}"
         
         yield event.plain_result(status_text)
 
@@ -305,10 +315,18 @@ class SGDGamePlugin(Star):
         self.save_players()
         yield event.plain_result(result)
 
-    def settle_mining(self, player: Dict) -> str:
-        """结算挖矿收益 - 考虑矿舱容量限制和自动卸货"""
+    def calculate_mining_progress(self, player: Dict, save_to_warehouse: bool = False) -> tuple:
+        """计算挖矿进度，可选择是否保存到仓库
+        
+        Args:
+            player: 玩家数据
+            save_to_warehouse: 是否将矿物保存到仓库（不停止挖矿）
+            
+        Returns:
+            (result_text, total_tons): 结果文本和总吨数
+        """
         if not player['mining']:
-            return ""
+            return "", 0
         
         mining = player['mining']
         duration = time.time() - mining['start_time']
@@ -330,7 +348,7 @@ class SGDGamePlugin(Star):
             player['assets'][planet] = {"minerals": {}, "ships": []}
         
         # 计算每个克隆体的挖矿情况
-        result_text = f"⛏️ 挖矿结算\n📍 地点：{planet}\n\n"
+        result_text = f"⛏️ 挖矿进度\n📍 地点：{planet}\n\n"
         total_all_tons = 0
         unload_count = 0
         
@@ -371,9 +389,11 @@ class SGDGamePlugin(Star):
             for mineral, ratio in minerals_ratio.items():
                 tons = (actual_volume * ratio) / mineral_volume[mineral]
                 if tons > 0:
-                    if mineral not in player['assets'][planet]['minerals']:
-                        player['assets'][planet]['minerals'][mineral] = 0
-                    player['assets'][planet]['minerals'][mineral] += tons
+                    if save_to_warehouse:
+                        # 保存到仓库
+                        if mineral not in player['assets'][planet]['minerals']:
+                            player['assets'][planet]['minerals'][mineral] = 0
+                        player['assets'][planet]['minerals'][mineral] += tons
                     clone_tons += tons
             
             total_all_tons += clone_tons
@@ -393,6 +413,20 @@ class SGDGamePlugin(Star):
             result_text += f" (挖矿{actual_mining_time/60:.1f}分钟 + 卸货{unload_count}分钟)"
         result_text += f"\n📊 总计：{total_all_tons:.2f}吨"
         
+        return result_text, total_all_tons
+
+    def settle_mining(self, player: Dict) -> str:
+        """结算挖矿收益 - 停止挖矿并保存矿物到仓库"""
+        if not player['mining']:
+            return ""
+        
+        # 计算并保存到仓库
+        result_text, _ = self.calculate_mining_progress(player, save_to_warehouse=True)
+        result_text = result_text.replace("⛏️ 挖矿进度", "⛏️ 挖矿结算")
+        
+        mining = player['mining']
+        planet = mining['planet']
+        
         # 恢复克隆体状态
         for clone in player['clones']:
             if clone['id'] in mining['clone_ids']:
@@ -400,6 +434,19 @@ class SGDGamePlugin(Star):
                 clone['location'] = planet
         
         player['mining'] = None
+        return result_text
+
+    def save_mining_progress(self, player: Dict) -> str:
+        """保存挖矿进度到仓库 - 不停止挖矿"""
+        if not player['mining']:
+            return ""
+        
+        # 计算并保存到仓库，但不停止挖矿
+        result_text, _ = self.calculate_mining_progress(player, save_to_warehouse=True)
+        
+        # 重置挖矿开始时间，以便下次计算增量
+        player['mining']['start_time'] = time.time()
+        
         return result_text
 
     # ========== 技能系统 ==========
