@@ -140,7 +140,7 @@ class SGDGamePlugin(Star):
 
     @filter.command("游戏状态")
     async def player_status(self, event: AstrMessageEvent):
-        """查看玩家状态"""
+        """查看玩家状态 - 自动检查技能升级"""
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
         
@@ -148,11 +148,29 @@ class SGDGamePlugin(Star):
         # 挖矿、战斗、制造不应该在这里结算，它们需要手动停止
         self.settle_warp(player)
         
+        # 检查所有已学习技能的升级情况
+        upgrade_messages = []
+        skills = player.get('skills', {})
+        for skill_name in list(skills.keys()):
+            result = self.check_skill_upgrade(player, skill_name)
+            if result:
+                upgrade_messages.append(result)
+        
+        # 检查正在学习的技能是否升级
+        if player.get('learning'):
+            result = self.check_skill_upgrade(player, player['learning']['skill'])
+            if result:
+                upgrade_messages.append(result)
+        
         status_text = f"""📊 指挥官状态
 
-👥 克隆体：{len(player['clones'])}/{player['max_clones']}个
-
-🚀 克隆体状态："""
+👥 克隆体：{len(player['clones'])}/{player['max_clones']}个"""
+        
+        # 显示技能升级信息
+        if upgrade_messages:
+            status_text += "\n\n" + "\n".join(upgrade_messages)
+        
+        status_text += "\n\n🚀 克隆体状态："
         
         for clone in player['clones']:
             ship = self.get_clone_ship(player, clone)
