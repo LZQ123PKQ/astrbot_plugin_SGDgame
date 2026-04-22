@@ -2454,13 +2454,15 @@ class SGDGamePlugin(Star):
             return
         
         system = player['location'].replace('小行星带', '')
-        security = self.get_system_security_type(system)
+        security_value = self.SYSTEM_SECURITY.get(system, 1.0)  # 数值型安等
+        security_type = self.get_system_security_type(system)  # 字符串类型（用于显示）
         
         player['status'] = '挖矿中'
         player['mining'] = {
             "start_time": time.time(),
             "system": system,  # 挖矿地点（固定不变）
-            "security": security,
+            "security": security_value,  # 数值型安等，用于比较
+            "security_type": security_type,  # 字符串类型，用于显示
             "ship_name": ship['name'],
             "last_settle_time": time.time(),  # 上次结算时间
             "total_volume": 0,  # 累计已结算矿量
@@ -2470,7 +2472,7 @@ class SGDGamePlugin(Star):
         }
         self.save_players()
         
-        sec_name = {"high": "高安", "low": "低安", "null": "00区"}.get(security, "未知")
+        sec_name = {"high": "高安", "low": "低安", "null": "00区"}.get(security_type, "未知")
         yield event.plain_result(f"⛏️ 开始挖矿\n📍 地点：{system}小行星带 ({sec_name})\n🚀 舰船：{ship['name']}")
 
     @filter.command("游戏停止挖矿")
