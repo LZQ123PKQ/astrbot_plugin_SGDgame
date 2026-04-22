@@ -558,25 +558,57 @@ class SGDGamePlugin(Star):
             # 格式化材料需求
             materials_text = "\n".join([f"  {mineral}：{tons:,}吨" for mineral, tons in blueprint['materials'].items()])
             
-            # 检查玩家是否满足制造条件
-            location = player['clones'][0]['location'] if player['clones'] else "地球"
-            if '小行星带' in location:
-                location = location.replace('小行星带', '')
+            # 检查所有行星的资产，找出满足制造需求的行星
+            can_build_planets = []
+            all_planets = set(player['assets'].keys())
+            for clone in player['clones']:
+                loc = clone['location']
+                if '小行星带' in loc:
+                    loc = loc.replace('小行星带', '')
+                all_planets.add(loc)
             
-            minerals = player['assets'].get(location, {}).get('minerals', {})
-            can_build = True
+            for planet in all_planets:
+                minerals = player['assets'].get(planet, {}).get('minerals', {})
+                can_build = True
+                for mineral, required in blueprint['materials'].items():
+                    have = minerals.get(mineral, 0)
+                    if have < required:
+                        can_build = False
+                        break
+                if can_build:
+                    can_build_planets.append(planet)
+            
+            # 计算总材料需求
+            total_required = sum(blueprint['materials'].values())
+            
+            # 计算所有行星的总库存
+            all_minerals = {}
+            for planet in player['assets']:
+                for mineral, tons in player['assets'][planet].get('minerals', {}).items():
+                    if mineral not in all_minerals:
+                        all_minerals[mineral] = 0
+                    all_minerals[mineral] += tons
+            
+            # 检查总体是否满足
+            can_build_global = True
             missing_materials = []
-            
             for mineral, required in blueprint['materials'].items():
-                have = minerals.get(mineral, 0)
+                have = all_minerals.get(mineral, 0)
                 if have < required:
-                    can_build = False
+                    can_build_global = False
                     missing_materials.append(f"{mineral}：{have:.0f}/{required}吨")
             
-            status_text = "✅ 可以制造" if can_build else "❌ 材料不足"
+            # 生成状态文本
+            if can_build_planets:
+                status_text = f"✅ 可以制造（在：{', '.join(can_build_planets)}）"
+            elif can_build_global:
+                status_text = "⚠️ 材料分散在多个行星，需要集中到同一行星"
+            else:
+                status_text = "❌ 材料不足"
+            
             missing_text = ""
             if missing_materials:
-                missing_text = "\n\n❌ 缺少材料：\n" + "\n".join([f"  {m}" for m in missing_materials])
+                missing_text = "\n\n❌ 缺少材料（全星系总计）：\n" + "\n".join([f"  {m}" for m in missing_materials])
             
             ship_info = f"""🚀 舰船制造需求
 
@@ -587,9 +619,9 @@ class SGDGamePlugin(Star):
 📦 材料需求：
 {materials_text}
 
-📍 检查材料位置：{location}（使用当前克隆体所在行星）
-{status_text}{missing_text}
+📍 {status_text}{missing_text}
 
+💡 提示：制造需要在同一行星拥有所有材料
 💡 使用 /游戏制造 {ship_id} 开始制造"""
             
             yield event.plain_result(ship_info)
