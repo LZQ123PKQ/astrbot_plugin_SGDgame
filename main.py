@@ -1057,13 +1057,13 @@ class SGDGamePlugin(Star):
     # ========== 资产系统 ==========
     
     def format_planet_assets(self, player: Dict, planet: str) -> str:
-        """格式化单个行星的资产信息"""
+        """格式化单个行星的资产信息（包括小行星带）"""
         text = f"{'='*30}\n"
         text += f"📍 {planet}\n"
         text += f"{'='*30}\n"
         
-        # 1. 显示在该行星的克隆体
-        clones_here = [c for c in player['clones'] if c['location'] == planet]
+        # 1. 显示在该行星或小行星带的克隆体
+        clones_here = [c for c in player['clones'] if c['location'] == planet or c['location'] == f"{planet}小行星带"]
         if clones_here:
             text += "👥 克隆体：\n"
             for clone in clones_here:
@@ -1125,9 +1125,20 @@ class SGDGamePlugin(Star):
             assets_text = f"📦 资产总览\n\n💰 钱包：¥{player['wallet']:,}\n"
             
             # 获取所有行星列表（包括有资产的和克隆体所在的）
-            all_planets = set(player['assets'].keys())
+            # 将"小行星带"映射到对应的行星
+            all_planets = set()
+            for planet in player['assets'].keys():
+                if '小行星带' in planet:
+                    all_planets.add(planet.replace('小行星带', ''))
+                else:
+                    all_planets.add(planet)
+            
             for clone in player['clones']:
-                all_planets.add(clone['location'])
+                location = clone['location']
+                if '小行星带' in location:
+                    all_planets.add(location.replace('小行星带', ''))
+                else:
+                    all_planets.add(location)
             
             for planet in sorted(all_planets):
                 assets_text += "\n" + self.format_planet_assets(player, planet)
