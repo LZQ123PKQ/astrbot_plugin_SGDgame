@@ -206,43 +206,6 @@ class SGDGamePlugin(Star):
         
         yield event.plain_result(status_text)
 
-    @filter.command("游戏舰船")
-    async def list_ships(self, event: AstrMessageEvent):
-        """查看可用舰船列表"""
-        user_id = str(event.get_sender_id())
-        player = self.get_player(user_id)
-        
-        ships_text = """🚀 可用舰船列表
-
-⚔️ 作战舰船：
-  狂风级护卫舰 - DPS:100 血量:5000 跃迁:20AU/分钟
-    所需技能：护卫舰操控理论Lv.1
-  骤雨级驱逐舰 - DPS:300 血量:10000 跃迁:15AU/分钟
-    所需技能：驱逐舰操控理论Lv.1
-  烈火级巡洋舰 - DPS:450 血量:40000 跃迁:10AU/分钟
-    所需技能：巡洋舰操控理论Lv.1
-  怒雷级战列舰 - DPS:1500 血量:120000 跃迁:5AU/分钟
-    所需技能：战列舰操控理论Lv.1
-
-⛏️ 采矿舰船：
-  蜜蜂级采矿护卫舰 - 矿舱:500m³ 速度:1m³/秒 跃迁:15AU/分钟
-    所需技能：采矿护卫舰操控理论Lv.1
-  蝗虫级采矿驳船 - 矿舱:3000m³ 速度:5m³/秒 跃迁:8AU/分钟
-    所需技能：采矿驳船操控理论Lv.1
-
-🚛 运输舰船：
-  崆峒级运输舰 - 货仓:60000m³ 跃迁:10AU/分钟
-    所需技能：运输舰操控理论Lv.1
-  泰山级货舰 - 货仓:2000000m³ 跃迁:3AU/分钟
-    所需技能：货舰操控理论Lv.1
-
-💡 提示：
-- 使用 /游戏机库 查看你拥有的舰船
-- 使用 /游戏换船 <克隆体ID> <舰船ID> 更换舰船
-- 血量加成 = 基础血量 × (1 + 操控技能等级 × 10%)"""
-        
-        yield event.plain_result(ships_text)
-
     # ========== 挖矿系统 ==========
     
     def get_mining_speed(self, ship_name: str, player: Dict) -> float:
@@ -500,6 +463,160 @@ class SGDGamePlugin(Star):
         player['mining']['start_time'] = time.time()
         
         return result_text
+
+    # ========== 制造系统 ==========
+    
+    # 舰船制造需求数据
+    SHIP_BLUEPRINTS = {
+        "狂风级护卫舰": {
+            "id": 1,
+            "type": "作战",
+            "materials": {"硫": 1000, "铁": 800, "硅": 500},
+            "skill": "护卫舰操控理论",
+            "time": 60  # 分钟
+        },
+        "骤雨级驱逐舰": {
+            "id": 2,
+            "type": "作战",
+            "materials": {"硫": 2000, "铁": 1500, "硅": 1000, "铝": 500},
+            "skill": "驱逐舰操控理论",
+            "time": 120
+        },
+        "烈火级巡洋舰": {
+            "id": 3,
+            "type": "作战",
+            "materials": {"硫": 5000, "铁": 3000, "硅": 2000, "铝": 1000, "镁": 500},
+            "skill": "巡洋舰操控理论",
+            "time": 240
+        },
+        "怒雷级战列舰": {
+            "id": 4,
+            "type": "作战",
+            "materials": {"硫": 10000, "铁": 6000, "硅": 4000, "铝": 2000, "镁": 1000, "锰": 500},
+            "skill": "战列舰操控理论",
+            "time": 480
+        },
+        "蜜蜂级采矿护卫舰": {
+            "id": 5,
+            "type": "采矿",
+            "materials": {"硫": 800, "铁": 600, "硅": 400},
+            "skill": "采矿护卫舰操控理论",
+            "time": 45
+        },
+        "蝗虫级采矿驳船": {
+            "id": 6,
+            "type": "采矿",
+            "materials": {"硫": 3000, "铁": 2000, "硅": 1500, "铝": 800, "镁": 400},
+            "skill": "采矿驳船操控理论",
+            "time": 180
+        },
+        "崆峒级运输舰": {
+            "id": 7,
+            "type": "运输",
+            "materials": {"硫": 1500, "铁": 1200, "硅": 800, "铝": 400},
+            "skill": "运输舰操控理论",
+            "time": 90
+        },
+        "泰山级货舰": {
+            "id": 8,
+            "type": "运输",
+            "materials": {"硫": 8000, "铁": 5000, "硅": 3000, "铝": 1500, "镁": 800, "锰": 400},
+            "skill": "货舰操控理论",
+            "time": 360
+        }
+    }
+    
+    @filter.command("游戏舰船")
+    async def list_ships(self, event: AstrMessageEvent):
+        """查看可用舰船列表或单个舰船的制造需求"""
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+        
+        args = event.message_str.split()[1:]
+        
+        if len(args) >= 1:
+            # 显示指定ID舰船的制造需求
+            try:
+                ship_id = int(args[0])
+            except ValueError:
+                yield event.plain_result("❌ 舰船ID必须是数字\n用法：/游戏舰船 [ID]")
+                return
+            
+            # 查找对应舰船
+            ship_name = None
+            for name, data in self.SHIP_BLUEPRINTS.items():
+                if data['id'] == ship_id:
+                    ship_name = name
+                    break
+            
+            if not ship_name:
+                yield event.plain_result(f"❌ 找不到ID为{ship_id}的舰船\n可用ID：1-8")
+                return
+            
+            blueprint = self.SHIP_BLUEPRINTS[ship_name]
+            
+            # 格式化材料需求
+            materials_text = "\n".join([f"  {mineral}：{tons:,}吨" for mineral, tons in blueprint['materials'].items()])
+            
+            # 检查玩家是否满足制造条件
+            location = player['clones'][0]['location'] if player['clones'] else "地球"
+            if '小行星带' in location:
+                location = location.replace('小行星带', '')
+            
+            minerals = player['assets'].get(location, {}).get('minerals', {})
+            can_build = True
+            missing_materials = []
+            
+            for mineral, required in blueprint['materials'].items():
+                have = minerals.get(mineral, 0)
+                if have < required:
+                    can_build = False
+                    missing_materials.append(f"{mineral}：{have:.0f}/{required}吨")
+            
+            status_text = "✅ 可以制造" if can_build else "❌ 材料不足"
+            missing_text = ""
+            if missing_materials:
+                missing_text = "\n\n❌ 缺少材料：\n" + "\n".join([f"  {m}" for m in missing_materials])
+            
+            ship_info = f"""🚀 舰船制造需求
+
+📋 {ship_name} (ID:{ship_id}) - {blueprint['type']}舰船
+⏱️ 制造时间：{blueprint['time']}分钟
+📚 所需技能：{blueprint['skill']}Lv.1
+
+📦 材料需求：
+{materials_text}
+
+📍 当前位置：{location}
+{status_text}{missing_text}
+
+💡 使用 /游戏制造 {ship_id} 开始制造"""
+            
+            yield event.plain_result(ship_info)
+        else:
+            # 显示所有舰船列表
+            ships_text = """🚀 可用舰船列表
+
+⚔️ 作战舰船：
+  ID:1 狂风级护卫舰 - DPS:100 血量:5000 跃迁:20AU/分钟
+  ID:2 骤雨级驱逐舰 - DPS:300 血量:10000 跃迁:15AU/分钟
+  ID:3 烈火级巡洋舰 - DPS:450 血量:40000 跃迁:10AU/分钟
+  ID:4 怒雷级战列舰 - DPS:1500 血量:120000 跃迁:5AU/分钟
+
+⛏️ 采矿舰船：
+  ID:5 蜜蜂级采矿护卫舰 - 矿舱:500m³ 速度:1m³/秒 跃迁:15AU/分钟
+  ID:6 蝗虫级采矿驳船 - 矿舱:3000m³ 速度:5m³/秒 跃迁:8AU/分钟
+
+🚛 运输舰船：
+  ID:7 崆峒级运输舰 - 货仓:60000m³ 跃迁:10AU/分钟
+  ID:8 泰山级货舰 - 货仓:2000000m³ 跃迁:3AU/分钟
+
+💡 提示：
+- 使用 /游戏舰船 <ID> 查看制造需求
+- 使用 /游戏机库 查看你拥有的舰船
+- 使用 /游戏换船 <克隆体ID> <舰船ID> 更换舰船"""
+            
+            yield event.plain_result(ships_text)
 
     # ========== 技能系统 ==========
     
