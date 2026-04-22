@@ -151,14 +151,21 @@ class SGDGamePlugin(Star):
         # 检查所有已学习技能的升级情况
         upgrade_messages = []
         skills = player.get('skills', {})
+        
+        # 获取正在学习的技能名（避免重复检查）
+        learning_skill = player.get('learning', {}).get('skill') if player.get('learning') else None
+        
         for skill_name in list(skills.keys()):
+            # 跳过正在学习的技能（后面单独检查）
+            if skill_name == learning_skill:
+                continue
             result = self.check_skill_upgrade(player, skill_name)
             if result:
                 upgrade_messages.append(result)
         
         # 检查正在学习的技能是否升级
-        if player.get('learning'):
-            result = self.check_skill_upgrade(player, player['learning']['skill'])
+        if learning_skill:
+            result = self.check_skill_upgrade(player, learning_skill)
             if result:
                 upgrade_messages.append(result)
         
