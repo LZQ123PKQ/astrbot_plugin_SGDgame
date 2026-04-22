@@ -2435,9 +2435,17 @@ class SGDGamePlugin(Star):
         player = self.get_player(user_id)
         
         if player['mining']:
-            # 如果已经在挖矿，先结算之前的挖矿
-            self.final_settle_mining(player)
-            self.save_players()
+            # 如果已经在挖矿，提示用户
+            mining = player['mining']
+            duration = time.time() - mining['start_time']
+            yield event.plain_result(
+                f"⛏️ 已在挖矿中\n"
+                f"📍 地点：{mining['system']}小行星带\n"
+                f"⏱️ 已进行：{duration/60:.1f}分钟\n"
+                f"🚀 舰船：{mining['ship_name']}\n\n"
+                f"输入 /游戏停止挖矿 停止当前挖矿"
+            )
+            return
         
         if player['status'] != '待机':
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法挖矿")
