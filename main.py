@@ -2435,7 +2435,9 @@ class SGDGamePlugin(Star):
         player = self.get_player(user_id)
         
         if player['mining']:
-            self.settle_mining(player)
+            # 如果已经在挖矿，先结算之前的挖矿
+            self.final_settle_mining(player)
+            self.save_players()
         
         if player['status'] != '待机':
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法挖矿")
