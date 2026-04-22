@@ -206,6 +206,43 @@ class SGDGamePlugin(Star):
         
         yield event.plain_result(status_text)
 
+    @filter.command("游戏舰船")
+    async def list_ships(self, event: AstrMessageEvent):
+        """查看可用舰船列表"""
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+        
+        ships_text = """🚀 可用舰船列表
+
+⚔️ 作战舰船：
+  狂风级护卫舰 - DPS:100 血量:5000 跃迁:20AU/分钟
+    所需技能：护卫舰操控理论Lv.1
+  骤雨级驱逐舰 - DPS:300 血量:10000 跃迁:15AU/分钟
+    所需技能：驱逐舰操控理论Lv.1
+  烈火级巡洋舰 - DPS:450 血量:40000 跃迁:10AU/分钟
+    所需技能：巡洋舰操控理论Lv.1
+  怒雷级战列舰 - DPS:1500 血量:120000 跃迁:5AU/分钟
+    所需技能：战列舰操控理论Lv.1
+
+⛏️ 采矿舰船：
+  蜜蜂级采矿护卫舰 - 矿舱:500m³ 速度:1m³/秒 跃迁:15AU/分钟
+    所需技能：采矿护卫舰操控理论Lv.1
+  蝗虫级采矿驳船 - 矿舱:3000m³ 速度:5m³/秒 跃迁:8AU/分钟
+    所需技能：采矿驳船操控理论Lv.1
+
+🚛 运输舰船：
+  崆峒级运输舰 - 货仓:60000m³ 跃迁:10AU/分钟
+    所需技能：运输舰操控理论Lv.1
+  泰山级货舰 - 货仓:2000000m³ 跃迁:3AU/分钟
+    所需技能：货舰操控理论Lv.1
+
+💡 提示：
+- 使用 /游戏机库 查看你拥有的舰船
+- 使用 /游戏换船 <克隆体ID> <舰船ID> 更换舰船
+- 血量加成 = 基础血量 × (1 + 操控技能等级 × 10%)"""
+        
+        yield event.plain_result(ships_text)
+
     # ========== 挖矿系统 ==========
     
     def get_mining_speed(self, ship_name: str, player: Dict) -> float:
