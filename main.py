@@ -587,7 +587,7 @@ class SGDGamePlugin(Star):
 📦 材料需求：
 {materials_text}
 
-📍 当前位置：{location}
+📍 检查材料位置：{location}（使用当前克隆体所在行星）
 {status_text}{missing_text}
 
 💡 使用 /游戏制造 {ship_id} 开始制造"""
@@ -595,7 +595,7 @@ class SGDGamePlugin(Star):
             yield event.plain_result(ship_info)
         else:
             # 显示所有舰船列表
-            ships_text = """🚀 可用舰船列表
+            ships_text = """🚀 全部舰船列表
 
 ⚔️ 作战舰船：
   ID:1 狂风级护卫舰 - DPS:100 血量:5000 跃迁:20AU/分钟
