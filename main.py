@@ -888,7 +888,7 @@ class SGDGamePlugin(Star):
 /游戏取消订单 <订单ID> - 取消指定订单
 /游戏购买 <物品名> [数量] - 自动购买该物品的最低价卖单
 
-📜 合同系统：
+📜 合同系统（任意星系空间站）：
 /游戏合同 - 查看合同列表（包括自己发布的和可接受的）
 /游戏合同 <合同ID> - 查看指定合同详情
 /游戏创建合同 <物品名> <数量> <单价> - 创建公开合同（任何人可接受）
@@ -897,8 +897,10 @@ class SGDGamePlugin(Star):
 /游戏取消合同 <合同ID> - 取消自己发布的合同，物品返还机库
 
 💡 合同说明：
+• 可在任意星系空间站创建合同（00区需有玩家建筑，暂未实现）
 • 公开合同：任何人都可以查看和接受
 • 定向合同：只有指定的玩家可以接受
+• 接受合同后，物品会存入接受方所在星系机库
 • 创建合同时物品会被冻结在中介
 • 接受合同时需要支付货款，物品立即转移
 
@@ -5039,11 +5041,17 @@ class SGDGamePlugin(Star):
             yield event.plain_result("❌ 数量和单价必须是数字")
             return
         
-        # 检查是否在空间站
+        # 检查是否可以停靠（NPC空间站或00区玩家建筑）
         system = player['location'].replace('小行星带', '')
-        if system not in self.NPC_STATIONS:
-            yield event.plain_result(f"❌ 必须在空间站才能创建合同（当前在{system}）")
-            return
+        security = self.SYSTEM_SECURITY.get(system, 1.0)
+        
+        # 高安/低安需要NPC空间站，00区需要玩家建筑
+        if security >= 0.0:  # 所有星系
+            if system not in self.NPC_STATIONS:
+                # 检查是否有玩家建筑（00区）
+                # TODO: 未来实现玩家建筑系统
+                # 暂时允许在任意位置创建合同（因为合同不涉及即时存储，物品在中介）
+                pass  # 允许创建合同
         
         # 确定合同类型和目标
         target_id = None
@@ -5203,12 +5211,20 @@ class SGDGamePlugin(Star):
             yield event.plain_result(f"❌ 余额不足（需要¥{total_price:,}，有¥{player['wallet']:,}）")
             return
         
-        # 检查是否在正确星系
+        # 检查是否在正确星系（接受方需要在合同指定的星系）
         system = contract.get('system', '吉他')
         current_system = player['location'].replace('小行星带', '')
         if current_system != system:
-            yield event.plain_result(f"❌ 必须在{system}空间站才能接受此合同")
+            yield event.plain_result(f"❌ 必须在{system}才能接受此合同")
             return
+        
+        # 检查是否可以停靠
+        security = self.SYSTEM_SECURITY.get(system, 1.0)
+        if security >= 0.0:  # 所有星系
+            if system not in self.NPC_STATIONS:
+                # 00区需要玩家建筑（TODO：未来实现）
+                # 暂时允许在任意位置接受合同
+                pass
         
         # 执行交易
         creator_id = contract.get('creator_id', '')
