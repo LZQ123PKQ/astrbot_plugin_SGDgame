@@ -5965,7 +5965,7 @@ class SGDGamePlugin(Star):
         yield event.plain_result(
             f"✅ 合同已拒绝\n"
             f"ID: {contract_id}\n"
-            f"卖家可以在"我的合同"中看到拒绝状态，需要卖家取消合同才能解冻物品"
+            f"卖家可以在【我的合同】中看到拒绝状态，需要卖家取消合同才能解冻物品"
         )
 
     @filter.command("游戏取消合同")
