@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from collections import deque
 
 # 插件版本号
-PLUGIN_VERSION = "3.0.3"
+PLUGIN_VERSION = "3.1.0"
 
 @register("astrbot_plugin_SGDGame", "LZQ123PKQ", "星际黎明 - 太空挂机游戏插件", PLUGIN_VERSION, "https://github.com/LZQ123PKQ/astrbot_plugin_SGDgame")
 class SGDGamePlugin(Star):
@@ -834,13 +834,13 @@ class SGDGamePlugin(Star):
             help_text = """🚀 星际黎明 - 太空挂机游戏 v3.0.7
 
 ╔═══════════════════════════╗
-║                                                                           ║
-║   📋 基础   💰 资产   📦 运输   🌌 导航               ║
-║                                                                           ║
-║   ⛏️ 挖矿   👾 刷怪   🔥 精炼   🔧 制造              ║
-║                                                                           ║
-║   🚀 舰船   💹 市场   📜 合同                                ║
-║                                                                           ║
+║                                                                           
+║   📋 基础   💰 资产   📦 运输   🌌 导航               
+║                                                                           
+║   ⛏️ 挖矿   👾 刷怪   🔥 精炼   🔧 制造              
+║                                                                           
+║   🚀 舰船   💹 市场   📜 合同                                
+║                                                                           
 ╚═══════════════════════════╝
 
 💡 输入 /游戏帮助 <系统> 查看详细命令
