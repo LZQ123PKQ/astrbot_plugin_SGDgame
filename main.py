@@ -10,7 +10,7 @@ from typing import Dict, List, Optional, Tuple
 from collections import deque
 
 # 插件版本号
-PLUGIN_VERSION = "3.0.1"
+PLUGIN_VERSION = "3.0.3"
 
 @register("astrbot_plugin_SGDGame", "LZQ123PKQ", "星际黎明 - 太空挂机游戏插件", PLUGIN_VERSION, "https://github.com/LZQ123PKQ/astrbot_plugin_SGDgame")
 class SGDGamePlugin(Star):
@@ -39,14 +39,22 @@ class SGDGamePlugin(Star):
         logger.info(f"星际黎明插件已加载 (版本: {PLUGIN_VERSION})")
 
     def _generate_order_id(self) -> str:
-        """生成唯一的订单ID"""
+        """生成唯一的订单ID（短格式）"""
         self._order_id_counter += 1
-        return f"ORD{int(time.time() * 1000)}-{self._order_id_counter}"
+        # 使用短格式：ORD + 6位随机字母数字
+        import random
+        import string
+        random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        return f"ORD{random_part}"
 
     def _generate_escrow_id(self) -> str:
-        """生成唯一的中介ID"""
+        """生成唯一的中介ID（短格式）"""
         self._escrow_id_counter += 1
-        return f"ESC{int(time.time() * 1000)}-{self._escrow_id_counter}"
+        # 使用短格式：ESC + 6位随机字母数字
+        import random
+        import string
+        random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        return f"ESC{random_part}"
 
     async def terminate(self):
         """插件被卸载/停用时会调用"""
@@ -98,8 +106,23 @@ class SGDGamePlugin(Star):
             # 确保活动状态字段存在
             if 'mining' not in player:
                 player['mining'] = None
+            elif player['mining']:
+                # 修复可能的错误数据：确保security是数值且正确
+                mining_system = player['mining'].get('system', '')
+                if mining_system:
+                    correct_security = self.SYSTEM_SECURITY.get(mining_system, 1.0)
+                    player['mining']['security'] = correct_security
+                    # 同时修复security_type（字符串类型）
+                    correct_security_type = self.get_system_security_type(mining_system)
+                    player['mining']['security_type'] = correct_security_type
             if 'manufacturing' not in player:
-                player['manufacturing'] = None
+                player['manufacturing'] = []
+            elif player['manufacturing'] is None:
+                # 兼容旧版本（单任务模式）
+                player['manufacturing'] = []
+            elif isinstance(player['manufacturing'], dict):
+                # 迁移旧版本数据：将单任务转换为列表
+                player['manufacturing'] = [player['manufacturing']]
             if 'navigating' not in player:
                 player['navigating'] = None
             if 'ratting' not in player:
@@ -115,6 +138,8 @@ class SGDGamePlugin(Star):
                     assets['ores'] = {}
                 if 'ships' not in assets:
                     assets['ships'] = []
+                if 'salvage' not in assets:
+                    assets['salvage'] = {}
                 
                 # 确保舰船数据结构完整
                 for ship in assets.get('ships', []):
@@ -242,7 +267,9 @@ class SGDGamePlugin(Star):
 
     def get_player(self, user_id: str) -> Dict:
         """获取玩家数据，单角色模式，自动初始化新玩家"""
-        self.players = self.load_players()
+        # 只在内存中没有数据时才加载，避免覆盖未保存的修改
+        if not self.players:
+            self.players = self.load_players()
         if user_id not in self.players:
             self.players[user_id] = self._create_default_player()
             self.save_players()
@@ -258,23 +285,24 @@ class SGDGamePlugin(Star):
             "ship_id": 1,
             "location": "吉他",
             "assets": {
-                "吉他": {
-                    "minerals": {},
-                    "ores": {},
-                    "ships": [
-                        {
-                            "id": 1,
-                            "name": "冲锋者级",
-                            "hp_percent": 100,
-                            "cargo": {},
-                            "ore_hold": {}
-                        }
-                    ]
-                }
-            },
+                    "吉他": {
+                        "minerals": {},
+                        "ores": {},
+                        "ships": [
+                            {
+                                "id": 1,
+                                "name": "冲锋者级",
+                                "hp_percent": 100,
+                                "cargo": {},
+                                "ore_hold": {}
+                            }
+                        ],
+                        "salvage": {}
+                    }
+                },
             "next_ship_id": 2,
             "mining": None,
-            "manufacturing": None,
+            "manufacturing": [],
             "navigating": None,
             "ratting": None,
             "transporting": None,
@@ -617,15 +645,28 @@ class SGDGamePlugin(Star):
     # ========== 刷怪系统 ==========
     # 怪物属性（单只）- 古斯塔斯海盗
     RAT_DATA = {
-        1: {"hp": 366480, "dps": 5, "bounty": 220000, "name": "古斯塔斯藏身处", "ship": "小鹰级"},
-        2: {"hp": 366480, "dps": 5, "bounty": 435000, "name": "古斯塔斯洞穴", "ship": "小鹰级"},
+        1: {"hp": 366480, "dps": 5, "bounty": 220000, "name": "古斯塔斯隐蔽处", "ship": "小鹰级"},
+        2: {"hp": 366480, "dps": 5, "bounty": 435000, "name": "古斯塔斯藏身处", "ship": "小鹰级"},
         3: {"hp": 608400, "dps": 7, "bounty": 1100000, "name": "古斯塔斯庇护所", "ship": "海燕级"},
         4: {"hp": 608400, "dps": 7, "bounty": 1450000, "name": "古斯塔斯贼窝", "ship": "海燕级"},
         5: {"hp": 929400, "dps": 33, "bounty": 2800000, "name": "古斯塔斯船坞", "ship": "巨鸟级"},
         6: {"hp": 929400, "dps": 33, "bounty": 3350000, "name": "古斯塔斯集会点", "ship": "巨鸟级"},
-        7: {"hp": 1727280, "dps": 36, "bounty": 7200000, "name": "古斯塔斯附属区", "ship": "娜迦级"},
-        8: {"hp": 1727280, "dps": 36, "bounty": 8500000, "name": "古斯塔斯基地", "ship": "娜迦级"},
-        9: {"hp": 1686840, "dps": 95, "bounty": 10000000, "name": "古斯塔斯堡垒", "ship": "鹏鲲级"},
+        7: {"hp": 1727280, "dps": 36, "bounty": 7200000, "name": "古斯塔斯港", "ship": "娜迦级"},
+        8: {"hp": 1727280, "dps": 36, "bounty": 8500000, "name": "古斯塔斯活动中心", "ship": "娜迦级"},
+        9: {"hp": 1686840, "dps": 95, "bounty": 10000000, "name": "古斯塔斯避难所", "ship": "鹏鲲级"},
+    }
+
+    # 刷怪残骸数据 - 刷完一个异常掉落一个残骸
+    RAT_SALVAGE = {
+        1: {"name": "古斯塔斯残骸（1级）", "volume": 5.22, "minerals": {"三钛合金": 1514, "类晶体胶矿": 541, "类银超金属": 97, "同位聚合体": 11, "超新星诺克石": 4, "晶状石英核岩": 1, "超噬矿": 0}},
+        2: {"name": "古斯塔斯残骸（2级）", "volume": 10.32, "minerals": {"三钛合金": 2996, "类晶体胶矿": 1070, "类银超金属": 193, "同位聚合体": 21, "超新星诺克石": 9, "晶状石英核岩": 2, "超噬矿": 0}},
+        3: {"name": "古斯塔斯残骸（3级）", "volume": 26.09, "minerals": {"三钛合金": 7571, "类晶体胶矿": 2704, "类银超金属": 487, "同位聚合体": 54, "超新星诺克石": 22, "晶状石英核岩": 5, "超噬矿": 1}},
+        4: {"name": "古斯塔斯残骸（4级）", "volume": 34.40, "minerals": {"三钛合金": 9974, "类晶体胶矿": 3562, "类银超金属": 641, "同位聚合体": 71, "超新星诺克石": 28, "晶状石英核岩": 7, "超噬矿": 1}},
+        5: {"name": "古斯塔斯残骸（5级）", "volume": 66.42, "minerals": {"三钛合金": 19292, "类晶体胶矿": 6890, "类银超金属": 1240, "同位聚合体": 138, "超新星诺克石": 55, "晶状石英核岩": 14, "超噬矿": 3}},
+        6: {"name": "古斯塔斯残骸（6级）", "volume": 79.46, "minerals": {"三钛合金": 23078, "类晶体胶矿": 8242, "类银超金属": 1484, "同位聚合体": 165, "超新星诺克石": 66, "晶状石英核岩": 16, "超噬矿": 3}},
+        7: {"name": "古斯塔斯残骸（7级）", "volume": 170.79, "minerals": {"三钛合金": 49510, "类晶体胶矿": 17680, "类银超金属": 3182, "同位聚合体": 354, "超新星诺克石": 141, "晶状石英核岩": 35, "超噬矿": 7}},
+        8: {"name": "古斯塔斯残骸（8级）", "volume": 201.62, "minerals": {"三钛合金": 58604, "类晶体胶矿": 20930, "类银超金属": 3767, "同位聚合体": 419, "超新星诺克石": 168, "晶状石英核岩": 42, "超噬矿": 8}},
+        9: {"name": "古斯塔斯残骸（9级）", "volume": 237.21, "minerals": {"三钛合金": 68964, "类晶体胶矿": 24570, "类银超金属": 4423, "同位聚合体": 491, "超新星诺克石": 196, "晶状石英核岩": 49, "超噬矿": 10}},
     }
 
     # 维修延时（往返时间）- 秒 - 作战舰船刷怪用
@@ -698,6 +739,8 @@ class SGDGamePlugin(Star):
 📋 基础功能：
 /游戏注册 - 创建游戏角色
 /游戏注销 - 注销当前角色
+/游戏重命名 <昵称> - 更改玩家昵称
+/游戏转账 <对方昵称或ID> <金额> - 转账给其他玩家
 /游戏帮助 - 显示所有可用指令
 /游戏状态 - 查看飞行员状态、位置、舰船、当前活动
 
@@ -737,7 +780,7 @@ class SGDGamePlugin(Star):
 
 💡 挖矿说明：
 • 高安/低安区：矿石直接存入本地空间站
-• 00区：矿舱满后需导航至最近NPC空间站卸货，会增加往返导航时间
+• 00区：需要有玩家建筑才能挖矿，矿石存入玩家建筑
 
 👾 刷怪系统：
 /游戏刷怪 - 在当前星系开始刷怪（自动根据舰船选择合适等级）
@@ -745,9 +788,9 @@ class SGDGamePlugin(Star):
 
 🔥 精炼系统：
 /游戏矿石 - 查看所有原矿列表
-/游戏精炼 - 精炼当前空间站中所有原矿
-/游戏精炼 <原矿名> - 精炼指定原矿的所有数量
-/游戏精炼 <原矿名> <数量> - 精炼指定原矿的指定数量
+/游戏精炼 - 精炼当前空间站中所有原矿和残骸
+/游戏精炼 <原矿名/残骸名> - 精炼指定原矿或残骸的所有数量
+/游戏精炼 <原矿名/残骸名> <数量> - 精炼指定原矿或残骸的指定数量
 /游戏提炼表 <原矿名> - 查看该原矿提炼产出表
 
 🔧 制造系统：
@@ -758,12 +801,12 @@ class SGDGamePlugin(Star):
 🚀 舰船系统：
 /游戏舰船 - 查看所有舰船列表
 /游戏舰船 <舰船> - 查看该舰船属性
-/游戏换船 <舰船名称> - 更换当前驾驶的舰船（需要在空间站中）
+/游戏换船 <舰船名称或ID> - 更换当前驾驶的舰船（需要在空间站中，同名空船用名称，有货船用ID）
 
 💰 市场系统（仅吉他）：
 /游戏市场 <物品名> - 查看该物品的最低价卖单和最高价买单（前5个）
-/游戏卖单 <物品名> <数量> <单价> - 上架卖单
-/游戏买单 <物品名> <数量> <单价> - 上架买单
+/游戏卖单 <物品名> <数量> <单价> - 上架卖单（单价支持两位小数）
+/游戏买单 <物品名> <数量> <单价> - 上架买单（单价支持两位小数）
 /游戏我的订单 - 查看自己上架的订单
 /游戏取消订单 <订单ID> - 取消指定订单
 /游戏购买 <物品名> [数量] - 自动购买该物品的最低价卖单
@@ -818,6 +861,114 @@ class SGDGamePlugin(Star):
             logger.error(traceback.format_exc())
             yield event.plain_result(f"❌ 注销失败: {str(e)}")
 
+    @filter.command("游戏重命名")
+    async def rename_player(self, event: AstrMessageEvent):
+        """重命名玩家昵称"""
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+
+        args = event.message_str.split()[1:]
+        
+        if not args:
+            yield event.plain_result("❌ 请输入新昵称\n用法：/游戏重命名 <新昵称>")
+            return
+        
+        new_name = args[0].strip()
+        
+        # 检查昵称长度
+        if len(new_name) < 2 or len(new_name) > 20:
+            yield event.plain_result("❌ 昵称长度必须在2-20个字符之间")
+            return
+        
+        # 检查昵称是否包含非法字符
+        import re
+        if not re.match(r'^[\u4e00-\u9fa5a-zA-Z0-9_]+$', new_name):
+            yield event.plain_result("❌ 昵称只能包含中文、英文、数字和下划线")
+            return
+        
+        # 检查是否与其他玩家重名
+        for other_user_id, other_player in self.players.items():
+            if other_user_id != user_id and other_player.get('name') == new_name:
+                yield event.plain_result(f"❌ 昵称 '{new_name}' 已被其他玩家使用")
+                return
+        
+        old_name = player.get('name', '飞行员')
+        player['name'] = new_name
+        self.save_players()
+        
+        yield event.plain_result(f"✅ 昵称已更改\n{old_name} → {new_name}")
+        logger.info(f"用户 {user_id} 昵称已更改: {old_name} → {new_name}")
+
+    @filter.command("游戏转账")
+    async def transfer_money(self, event: AstrMessageEvent):
+        """转账给其他玩家"""
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+
+        args = event.message_str.split()[1:]
+
+        if len(args) < 2:
+            yield event.plain_result("❌ 参数不足\n用法：/游戏转账 <对方昵称或ID> <金额>")
+            return
+
+        target = args[0].strip()
+        try:
+            amount = int(args[1])
+        except ValueError:
+            yield event.plain_result("❌ 金额必须是整数")
+            return
+
+        if amount <= 0:
+            yield event.plain_result("❌ 转账金额必须大于0")
+            return
+
+        # 检查自己余额
+        if player['wallet'] < amount:
+            yield event.plain_result(f"❌ 余额不足（当前余额：¥{player['wallet']:,}）")
+            return
+
+        # 查找目标玩家
+        target_player = None
+        target_user_id = None
+
+        # 先尝试作为ID查找
+        if target in self.players:
+            target_player = self.players[target]
+            target_user_id = target
+        else:
+            # 尝试作为昵称查找
+            for uid, p in self.players.items():
+                if p.get('name') == target:
+                    target_player = p
+                    target_user_id = uid
+                    break
+
+        if not target_player:
+            yield event.plain_result(f"❌ 未找到玩家 '{target}'")
+            return
+
+        # 不能转给自己
+        if target_user_id == user_id:
+            yield event.plain_result("❌ 不能转账给自己")
+            return
+
+        # 执行转账
+        player['wallet'] -= amount
+        target_player['wallet'] += amount
+        self.save_players()
+
+        sender_name = player.get('name', '飞行员')
+        receiver_name = target_player.get('name', '飞行员')
+
+        yield event.plain_result(
+            f"💰 转账成功\n"
+            f"付款人：{sender_name}\n"
+            f"收款人：{receiver_name}\n"
+            f"金额：¥{amount:,}\n"
+            f"您的余额：¥{player['wallet']:,}"
+        )
+        logger.info(f"转账：{sender_name}({user_id}) → {receiver_name}({target_user_id}) ¥{amount}")
+
     @filter.command("游戏状态")
     async def player_status(self, event: AstrMessageEvent):
         user_id = str(event.get_sender_id())
@@ -865,12 +1016,17 @@ class SGDGamePlugin(Star):
             nav = player['navigating']
             status_text += f"\n\n🚀 导航中...\n  {nav['current']} → {nav['target']}\n  进度：{nav['current_step']}/{nav['total_steps']} 跳"
 
-        if player.get('manufacturing'):
-            mfg = player['manufacturing']
-            elapsed = time.time() - mfg['start_time']
-            remaining = max(0, mfg['duration'] - elapsed)
-            progress = min(100, elapsed / mfg['duration'] * 100)
-            status_text += f"\n\n🔧 制造中：{mfg['ship']}\n  进度：{progress:.1f}%\n  剩余：{remaining/60:.1f}分钟"
+        # 显示制造状态（支持多线程）
+        if isinstance(player.get('manufacturing'), list) and player['manufacturing']:
+            mfg_count = len(player['manufacturing'])
+            status_text += f"\n\n🔧 制造中：{mfg_count}个任务"
+            for idx, mfg in enumerate(player['manufacturing'][:3], 1):  # 最多显示前3个
+                elapsed = time.time() - mfg['start_time']
+                remaining = max(0, mfg['duration'] - elapsed)
+                progress = min(100, elapsed / mfg['duration'] * 100)
+                status_text += f"\n  [{idx}] {mfg['ship']} {progress:.0f}%"
+            if mfg_count > 3:
+                status_text += f"\n  ...还有{mfg_count - 3}个任务"
         
         yield event.plain_result(status_text)
 
@@ -900,7 +1056,7 @@ class SGDGamePlugin(Star):
             system = player['location'].replace('小行星带', '')
         
         if system not in player['assets']:
-            yield event.plain_result(f"📦 {system} 机库\n\n暂无材料")
+            yield event.plain_result(f"📦 {system} 仓库\n\n暂无材料")
             return
         
         assets = player['assets'][system]
@@ -925,6 +1081,15 @@ class SGDGamePlugin(Star):
         else:
             text += "\n💎 矿物：无\n"
 
+        # 残骸
+        salvage = assets.get('salvage', {})
+        if salvage:
+            text += "\n📦 残骸：\n"
+            for name, count in sorted(salvage.items()):
+                text += f"  {name}：{count}个\n"
+        else:
+            text += "\n📦 残骸：无\n"
+
         yield event.plain_result(text)
 
     @filter.command("游戏资产")
@@ -948,22 +1113,51 @@ class SGDGamePlugin(Star):
         if mfg_result:
             text += f"\n🔧 {mfg_result}\n"
         
+        # 检查是否在运输或导航中
+        transport = player.get('transporting')
+        navigating = player.get('navigating')
+        current_location = player['location'].replace('小行星带', '')
+        
         # 获取所有有资产的星系
-        systems_with_assets = []
+        systems_with_assets = {}
         for system, assets in player['assets'].items():
             has_ships = len(assets.get('ships', [])) > 0
             has_ores = len(assets.get('ores', {})) > 0
             has_minerals = len(assets.get('minerals', {})) > 0
-            if has_ships or has_ores or has_minerals:
-                systems_with_assets.append(system)
+            has_salvage = len(assets.get('salvage', {})) > 0
+            if has_ships or has_ores or has_minerals or has_salvage:
+                systems_with_assets[system] = assets
+        
+        # 如果在运输或导航中，调整当前驾驶舰船的位置显示
+        if transport or navigating:
+            ship_id = player.get('ship_id')
+            if ship_id:
+                # 从各个星系中移除当前驾驶的舰船（因为它在运输/导航中）
+                for system, assets in list(systems_with_assets.items()):
+                    ships = assets.get('ships', [])
+                    for i, ship in enumerate(ships):
+                        if ship['id'] == ship_id:
+                            ships.pop(i)
+                            if not ships and not assets.get('ores') and not assets.get('minerals') and not assets.get('salvage'):
+                                del systems_with_assets[system]
+                            break
+                
+                # 在当前位置添加运输/导航中的舰船
+                if transport:
+                    ship_data_info = transport.get('ship_data', {})
+                    if ship_data_info:
+                        if current_location not in systems_with_assets:
+                            systems_with_assets[current_location] = {'minerals': {}, 'ores': {}, 'ships': [], 'salvage': {}}
+                        systems_with_assets[current_location]['ships'].append(ship_data_info)
         
         if systems_with_assets:
             text += f"\n📍 有资产的星系：\n"
-            for system in sorted(systems_with_assets):
-                assets = player['assets'][system]
+            for system in sorted(systems_with_assets.keys()):
+                assets = systems_with_assets[system]
                 ships_count = len(assets.get('ships', []))
                 ores_count = len(assets.get('ores', {}))
                 minerals_count = len(assets.get('minerals', {}))
+                salvage_count = len(assets.get('salvage', {}))
                 info = []
                 if ships_count > 0:
                     info.append(f"{ships_count}艘舰船")
@@ -971,6 +1165,8 @@ class SGDGamePlugin(Star):
                     info.append(f"{ores_count}种原矿")
                 if minerals_count > 0:
                     info.append(f"{minerals_count}种矿物")
+                if salvage_count > 0:
+                    info.append(f"{salvage_count}种残骸")
                 text += f"  {system} - {', '.join(info)}\n"
         else:
             text += "\n📍 暂无资产\n"
@@ -988,6 +1184,15 @@ class SGDGamePlugin(Star):
                     ship_name = ship_data['name']
                     ship_volume = self.SHIPS_DATA.get(ship_name, {}).get('volume', 1000)
                     total_volume += ship_volume
+            elif item_type == '残骸':
+                # 查找残骸体积
+                for salvage_name, count in items.items():
+                    salvage_volume = 0
+                    for level, data in self.RAT_SALVAGE.items():
+                        if data['name'] == salvage_name:
+                            salvage_volume = data['volume']
+                            break
+                    total_volume += count * salvage_volume
             else:
                 for item_name, amount in items.items():
                     if item_type == '矿石':
@@ -1010,6 +1215,12 @@ class SGDGamePlugin(Star):
         elif item_type == '舰船':
             # 从舰船数据获取实际体积
             return self.SHIPS_DATA.get(item_name, {}).get('volume', 1000)
+        elif item_type == '残骸':
+            # 查找残骸体积
+            for level, data in self.RAT_SALVAGE.items():
+                if data['name'] == item_name:
+                    return data['volume']
+            return 0.1
         return 0.1
 
     @filter.command("游戏装载")
@@ -1020,10 +1231,14 @@ class SGDGamePlugin(Star):
 
         args = event.message_str.split()[1:]
 
-        # 检查状态
-        if player['status'] != '待机':
+        # 装载可以与制造同时进行，只需要检查是否在挖矿、刷怪或导航中
+        if player['status'] in ['挖矿中', '刷怪中', '导航中', '运输中']:
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法装载货物")
             return
+
+        # 如果状态是制造中，将其重置为待机（制造是后台活动）
+        if player['status'] == '制造中':
+            player['status'] = '待机'
 
         # 获取当前舰船
         ship = self.get_player_ship(player)
@@ -1392,10 +1607,14 @@ class SGDGamePlugin(Star):
 
         args = event.message_str.split()[1:]
 
-        # 检查状态
-        if player['status'] != '待机':
+        # 卸载可以与制造同时进行，只需要检查是否在挖矿、刷怪或导航中
+        if player['status'] in ['挖矿中', '刷怪中', '导航中', '运输中']:
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法卸载货物")
             return
+
+        # 如果状态是制造中，将其重置为待机（制造是后台活动）
+        if player['status'] == '制造中':
+            player['status'] = '待机'
 
         # 获取当前舰船
         ship = self.get_player_ship(player)
@@ -1414,7 +1633,7 @@ class SGDGamePlugin(Star):
         # 获取当前星系
         system = player['location'].replace('小行星带', '')
         if system not in player['assets']:
-            player['assets'][system] = {"minerals": {}, "ores": {}, "ships": []}
+            player['assets'][system] = {"minerals": {}, "ores": {}, "ships": [], "salvage": {}}
         assets = player['assets'][system]
 
         # 无参数 - 卸载所有货物
@@ -1585,6 +1804,15 @@ class SGDGamePlugin(Star):
                         loaded_ship_name = ship_data['name']
                         ship_volume = self.SHIPS_DATA.get(loaded_ship_name, {}).get('volume', 1000)
                         cargo_volume += ship_volume
+                elif item_type == '残骸':
+                    for salvage_name, count in items.items():
+                        # 查找残骸体积
+                        salvage_volume = 0
+                        for level, data in self.RAT_SALVAGE.items():
+                            if data['name'] == salvage_name:
+                                salvage_volume = data['volume']
+                                break
+                        cargo_volume += count * salvage_volume
                 else:
                     for item_name, amount in items.items():
                         if item_type == '矿石':
@@ -1623,9 +1851,23 @@ class SGDGamePlugin(Star):
 
     # ========== 辅助方法 ==========
     def get_player_ship(self, player: Dict) -> Optional[Dict]:
+        """获取玩家当前驾驶的舰船
+        
+        特殊情况：
+        - 运输过程中：从transporting数据中获取舰船
+        - 正常情况：从当前所在星系的assets中获取舰船
+        """
         ship_id = player.get('ship_id')
         if ship_id is None:
             return None
+        
+        # 检查是否在运输中
+        transport = player.get('transporting')
+        if transport and transport.get('ship_id') == ship_id:
+            # 运输过程中，返回运输数据中的舰船
+            return transport.get('ship_data')
+        
+        # 正常情况：从当前所在星系的assets中查找
         location = player['location'].replace('小行星带', '')
         for ship in player['assets'].get(location, {}).get('ships', []):
             if ship['id'] == ship_id:
@@ -1705,6 +1947,7 @@ class SGDGamePlugin(Star):
             text += "\n⛏️ 小行星带：\n  黑赭石、灰岩、艾克诺岩、双多特石、克洛基石、基腹断岩"
         
         # 刷怪点信息
+        security_value = self.SYSTEM_SECURITY.get(system, 1.0)
         available_levels = self.get_rat_level_by_security(security_value)
         text += "\n\n👾 刷怪点：\n"
         for level in available_levels:
@@ -1810,9 +2053,14 @@ class SGDGamePlugin(Star):
             yield event.plain_result(f"❌ 已经在{target_system}了")
             return
         
-        if player['status'] != '待机':
+        # 导航可以与制造同时进行，只需要检查是否在挖矿、刷怪或导航中
+        if player['status'] in ['挖矿中', '刷怪中', '导航中', '运输中']:
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法导航")
             return
+        
+        # 如果状态是制造中，将其重置为待机（制造是后台活动）
+        if player['status'] == '制造中':
+            player['status'] = '待机'
         
         path = self.find_path(current_system, target_system)
         if not path:
@@ -1868,20 +2116,15 @@ class SGDGamePlugin(Star):
             )
             return
         
-        # 检查是否是挖矿过程中的导航（00区卸货导航）
+        # 检查是否是挖矿过程中的导航（旧数据兼容，现在不应该出现这种情况）
         if player.get('mining'):
             mining = player['mining']
             phase = mining.get('phase', 'mining')
             if phase in ['unloading', 'returning']:
-                phase_name = '导航去空间站卸货' if phase == 'unloading' else '返回挖矿点'
-                yield event.plain_result(
-                    "❌ 当前正在挖矿过程中的导航阶段\n"
-                    f"阶段：{phase_name}\n"
-                    "挖矿过程中的导航不能单独停止\n"
-                    "输入 /游戏停止挖矿 停止整个挖矿任务\n"
-                    "（矿石将保留在船上矿舱中）"
-                )
-                return
+                # 强制恢复到mining阶段
+                mining['phase'] = 'mining'
+                player['status'] = '挖矿中'
+                # 继续执行停止导航逻辑
         
         # 先结算导航进度，获取当前实际位置
         nav_result = self.settle_navigation(player)
@@ -2003,10 +2246,14 @@ class SGDGamePlugin(Star):
             yield event.plain_result("❌ 起始星系和目标星系不能相同")
             return
         
-        # 检查当前状态
-        if player['status'] != '待机':
+        # 运输可以与制造同时进行，只需要检查是否在挖矿、刷怪或导航中
+        if player['status'] in ['挖矿中', '刷怪中', '导航中', '运输中']:
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法开始运输")
             return
+        
+        # 如果状态是制造中，将其重置为待机（制造是后台活动）
+        if player['status'] == '制造中':
+            player['status'] = '待机'
         
         # 检查是否已有运输任务
         if player.get('transporting'):
@@ -2037,13 +2284,25 @@ class SGDGamePlugin(Star):
             yield event.plain_result("❌ 舰船没有货柜或矿舱，无法运输")
             return
         
+        # 获取当前舰船信息（用于运输过程中跟踪）
+        ship = self.get_player_ship(player)
+        ship_id = player.get('ship_id')
+        
         # 启动运输任务
         player['transporting'] = {
             'source': source_system,
             'target': target_system,
             'status': '准备中',
             'trip_count': 0,
-            'start_time': time.time()
+            'start_time': time.time(),
+            'ship_id': ship_id,  # 记录运输舰船ID
+            'ship_data': {  # 记录运输舰船数据副本
+                'id': ship['id'],
+                'name': ship['name'],
+                'hp_percent': ship.get('hp_percent', 100),
+                'cargo': ship.get('cargo', {}),
+                'ore_hold': ship.get('ore_hold', {})
+            }
         }
         self.save_players()
         
@@ -2103,12 +2362,32 @@ class SGDGamePlugin(Star):
         transport = player['transporting']
         trip_count = transport['trip_count']
         
+        # 获取运输舰船数据
+        ship_data_info = transport.get('ship_data', {})
+        current_location = player['location'].replace('小行星带', '')
+        
         # 清除运输状态
         player['transporting'] = None
         
         # 如果正在导航，先结算导航
         if player['status'] == '导航中':
             self.settle_navigation(player)
+        
+        # 将运输舰船保存回当前所在星系的机库
+        if ship_data_info:
+            if current_location not in player['assets']:
+                player['assets'][current_location] = {'minerals': {}, 'ores': {}, 'ships': [], 'salvage': {}}
+
+            # 检查机库中是否已有该舰船（避免重复）
+            existing_ship = None
+            for ship in player['assets'][current_location].get('ships', []):
+                if ship['id'] == ship_data_info['id']:
+                    existing_ship = ship
+                    break
+            
+            if not existing_ship:
+                player['assets'][current_location]['ships'].append(ship_data_info)
+                logger.info(f"运输停止：舰船 {ship_data_info['name']} 已保存到 {current_location} 机库")
         
         # 如果不在待机状态，设置为待机
         if player['status'] != '待机':
@@ -2124,16 +2403,15 @@ class SGDGamePlugin(Star):
 
     async def _transport_loop(self, user_id: str):
         """运输循环任务"""
+        transport_completed = False
+        
         while True:
             try:
-                # 重新加载最新玩家数据（避免覆盖其他修改）
-                latest_players = self.load_players()
-                if user_id not in latest_players:
+                # 使用内存中的数据，避免重新加载覆盖其他修改
+                if not self.players or user_id not in self.players:
                     logger.info(f"运输任务：玩家 {user_id} 不存在，停止运输")
                     break
                 
-                # 更新内存中的玩家数据
-                self.players[user_id] = latest_players[user_id]
                 player = self.players[user_id]
                 
                 transport = player.get('transporting')
@@ -2141,12 +2419,48 @@ class SGDGamePlugin(Star):
                     logger.info(f"运输任务：玩家 {user_id} 没有运输任务，停止")
                     break
                 
+                # 检查运输是否已完成
+                if transport.get('status') == '已完成':
+                    logger.info(f"运输任务：玩家 {user_id} 运输已完成")
+                    transport_completed = True
+                    break
+                
                 source_system = transport['source']
                 target_system = transport['target']
                 current_location = player['location'].replace('小行星带', '')
                 
-                # 检查是否需要装载（在起始星系）
-                if current_location == source_system:
+                # 如果正在导航中，先结算导航进度
+                if player.get('navigating'):
+                    # 更新运输状态为导航中
+                    nav_target = player['navigating'].get('target', '未知')
+                    if transport.get('status') != f'导航到{nav_target}':
+                        transport['status'] = f'导航到{nav_target}'
+                        self.save_players()
+                    
+                    # 运输过程中使用特殊的导航结算（不移动assets中的舰船）
+                    nav = player['navigating']
+                    elapsed = time.time() - nav['start_time']
+                    jump_time = nav['jump_time']
+                    completed_jumps = int(elapsed / jump_time)
+                    
+                    if completed_jumps > nav['current_step']:
+                        nav['current_step'] = min(completed_jumps, nav['total_steps'])
+                        nav['current'] = nav['path'][nav['current_step']]
+                        player['location'] = nav['current']
+                        self.save_players()
+                        
+                        if nav['current_step'] >= nav['total_steps']:
+                            # 导航完成
+                            player['status'] = '待机'
+                            player['navigating'] = None
+                            self.save_players()
+                            logger.info(f"运输任务：导航完成，到达 {player['location']}")
+                    
+                    # 重新获取当前位置
+                    current_location = player['location'].replace('小行星带', '')
+                
+                # 检查是否需要装载（在起始星系且不在导航中）
+                if current_location == source_system and not player.get('navigating'):
                     # 检查起始星系是否还有物品
                     source_assets = player['assets'].get(source_system, {})
                     has_items = (
@@ -2166,21 +2480,21 @@ class SGDGamePlugin(Star):
                     transport['status'] = f'在{source_system}装载中'
                     logger.info(f"运输任务：在{source_system}装载物品")
                     
-                    # 执行装载逻辑（简化版，装载所有物品）
-                    ship = self.get_player_ship(player)
-                    if ship:
+                    # 执行装载逻辑 - 直接操作transport中的ship_data
+                    ship_data_info = transport.get('ship_data', {})
+                    if ship_data_info:
                         # 初始化货柜和矿舱
-                        if 'cargo' not in ship:
-                            ship['cargo'] = {}
-                        if 'ore_hold' not in ship:
-                            ship['ore_hold'] = {}
+                        if 'cargo' not in ship_data_info:
+                            ship_data_info['cargo'] = {}
+                        if 'ore_hold' not in ship_data_info:
+                            ship_data_info['ore_hold'] = {}
                         
-                        ship_data = self.SHIPS_DATA.get(ship['name'], {})
-                        cargo_capacity = ship_data.get('cargo', 0)
-                        ore_hold_capacity = ship_data.get('ore_hold', 0)
+                        ship_template = self.SHIPS_DATA.get(ship_data_info['name'], {})
+                        cargo_capacity = ship_template.get('cargo', 0)
+                        ore_hold_capacity = ship_template.get('ore_hold', 0)
                         
-                        current_cargo_volume = self._get_cargo_volume(ship.get('cargo', {}))
-                        current_ore_hold_volume = self._get_cargo_volume(ship.get('ore_hold', {}))
+                        current_cargo_volume = self._get_cargo_volume(ship_data_info.get('cargo', {}))
+                        current_ore_hold_volume = self._get_cargo_volume(ship_data_info.get('ore_hold', {}))
                         available_cargo_space = cargo_capacity - current_cargo_volume
                         available_ore_hold_space = ore_hold_capacity - current_ore_hold_volume
                         
@@ -2197,9 +2511,9 @@ class SGDGamePlugin(Star):
                                     source_assets['ores'][ore_name] -= load_amount
                                     if source_assets['ores'][ore_name] <= 0:
                                         del source_assets['ores'][ore_name]
-                                    if ore_name not in ship['ore_hold']:
-                                        ship['ore_hold'][ore_name] = 0
-                                    ship['ore_hold'][ore_name] += load_amount
+                                    if ore_name not in ship_data_info['ore_hold']:
+                                        ship_data_info['ore_hold'][ore_name] = 0
+                                    ship_data_info['ore_hold'][ore_name] += load_amount
                                     available_ore_hold_space -= load_amount * item_volume
                                     remaining -= load_amount
                             
@@ -2212,11 +2526,11 @@ class SGDGamePlugin(Star):
                                         source_assets['ores'][ore_name] -= load_amount
                                         if source_assets['ores'][ore_name] <= 0:
                                             del source_assets['ores'][ore_name]
-                                    if '矿石' not in ship['cargo']:
-                                        ship['cargo']['矿石'] = {}
-                                    if ore_name not in ship['cargo']['矿石']:
-                                        ship['cargo']['矿石'][ore_name] = 0
-                                    ship['cargo']['矿石'][ore_name] += load_amount
+                                    if '矿石' not in ship_data_info['cargo']:
+                                        ship_data_info['cargo']['矿石'] = {}
+                                    if ore_name not in ship_data_info['cargo']['矿石']:
+                                        ship_data_info['cargo']['矿石'][ore_name] = 0
+                                    ship_data_info['cargo']['矿石'][ore_name] += load_amount
                                     available_cargo_space -= load_amount * item_volume
                         
                         # 装载矿物（只能货柜）
@@ -2228,11 +2542,11 @@ class SGDGamePlugin(Star):
                                 source_assets['minerals'][mineral_name] -= load_amount
                                 if source_assets['minerals'][mineral_name] <= 0:
                                     del source_assets['minerals'][mineral_name]
-                                if '矿物' not in ship['cargo']:
-                                    ship['cargo']['矿物'] = {}
-                                if mineral_name not in ship['cargo']['矿物']:
-                                    ship['cargo']['矿物'][mineral_name] = 0
-                                ship['cargo']['矿物'][mineral_name] += load_amount
+                                if '矿物' not in ship_data_info['cargo']:
+                                    ship_data_info['cargo']['矿物'] = {}
+                                if mineral_name not in ship_data_info['cargo']['矿物']:
+                                    ship_data_info['cargo']['矿物'][mineral_name] = 0
+                                ship_data_info['cargo']['矿物'][mineral_name] += load_amount
                                 available_cargo_space -= load_amount * item_volume
                         
                         # 装载舰船（只能货柜）
@@ -2251,10 +2565,40 @@ class SGDGamePlugin(Star):
                             # 从仓库扣除
                             source_assets['ships'].remove(target_ship)
                             # 装载到货柜
-                            if '舰船' not in ship['cargo']:
-                                ship['cargo']['舰船'] = []
-                            ship['cargo']['舰船'].append(target_ship)
+                            if '舰船' not in ship_data_info['cargo']:
+                                ship_data_info['cargo']['舰船'] = []
+                            ship_data_info['cargo']['舰船'].append(target_ship)
                             available_cargo_space -= item_volume
+                        
+                        # 装载残骸（只能货柜）
+                        for salvage_name, salvage_count in list(source_assets.get('salvage', {}).items()):
+                            # 获取残骸体积
+                            salvage_volume = 0
+                            for level, data in self.RAT_SALVAGE.items():
+                                if data['name'] == salvage_name:
+                                    salvage_volume = data['volume']
+                                    break
+                            
+                            if salvage_volume <= 0:
+                                continue
+                            
+                            # 计算可装载数量
+                            max_load = int(available_cargo_space / salvage_volume)
+                            load_count = min(salvage_count, max_load)
+                            
+                            if load_count > 0:
+                                # 从仓库扣除
+                                source_assets['salvage'][salvage_name] -= load_count
+                                if source_assets['salvage'][salvage_name] <= 0:
+                                    del source_assets['salvage'][salvage_name]
+                                
+                                # 装载到货柜
+                                if '残骸' not in ship_data_info['cargo']:
+                                    ship_data_info['cargo']['残骸'] = {}
+                                if salvage_name not in ship_data_info['cargo']['残骸']:
+                                    ship_data_info['cargo']['残骸'][salvage_name] = 0
+                                ship_data_info['cargo']['残骸'][salvage_name] += load_count
+                                available_cargo_space -= load_count * salvage_volume
                     
                     # 保存装载后的数据
                     self.save_players()
@@ -2275,7 +2619,7 @@ class SGDGamePlugin(Star):
                             'total_steps': len(path) - 1,
                             'current': source_system,
                             'start_time': time.time(),
-                            'jump_time': self.calculate_jump_time(ship['name']) if ship else 20
+                            'jump_time': self.calculate_jump_time(ship_data_info['name']) if ship_data_info else 20
                         }
                         self.save_players()
                         logger.info(f"运输任务：开始导航到{target_system}")
@@ -2286,25 +2630,33 @@ class SGDGamePlugin(Star):
                     transport['status'] = f'在{target_system}卸载中'
                     logger.info(f"运输任务：在{target_system}卸载物品")
                     
-                    ship = self.get_player_ship(player)
-                    if ship:
+                    # 使用transport中的ship_data进行卸载
+                    ship_data_info = transport.get('ship_data', {})
+                    if ship_data_info:
                         if target_system not in player['assets']:
-                            player['assets'][target_system] = {'minerals': {}, 'ores': {}, 'ships': []}
+                            player['assets'][target_system] = {'minerals': {}, 'ores': {}, 'ships': [], 'salvage': {}}
                         target_assets = player['assets'][target_system]
                         
                         # 卸载矿舱中的矿石
-                        for ore_name, amount in list(ship.get('ore_hold', {}).items()):
+                        for ore_name, amount in list(ship_data_info.get('ore_hold', {}).items()):
                             if ore_name not in target_assets['ores']:
                                 target_assets['ores'][ore_name] = 0
                             target_assets['ores'][ore_name] += amount
-                        ship['ore_hold'] = {}
+                        ship_data_info['ore_hold'] = {}
                         
                         # 卸载货柜中的物品
-                        cargo = ship.get('cargo', {})
+                        cargo = ship_data_info.get('cargo', {})
                         for item_type, items in list(cargo.items()):
                             if item_type == '舰船':
-                                for ship_data in items:
-                                    target_assets['ships'].append(ship_data)
+                                for loaded_ship_data in items:
+                                    target_assets['ships'].append(loaded_ship_data)
+                            elif item_type == '残骸':
+                                for salvage_name, count in items.items():
+                                    if 'salvage' not in target_assets:
+                                        target_assets['salvage'] = {}
+                                    if salvage_name not in target_assets['salvage']:
+                                        target_assets['salvage'][salvage_name] = 0
+                                    target_assets['salvage'][salvage_name] += count
                             else:
                                 for item_name, amount in items.items():
                                     if item_type == '矿石':
@@ -2315,7 +2667,7 @@ class SGDGamePlugin(Star):
                                         if item_name not in target_assets['minerals']:
                                             target_assets['minerals'][item_name] = 0
                                         target_assets['minerals'][item_name] += amount
-                        ship['cargo'] = {}
+                        ship_data_info['cargo'] = {}
                     
                     transport['trip_count'] += 1
                     # 保存卸载后的数据
@@ -2323,7 +2675,23 @@ class SGDGamePlugin(Star):
                     logger.info(f"运输任务：卸载完成，已往返{transport['trip_count']}次")
                     await asyncio.sleep(1)  # 短暂延迟
                     
-                    # 返回起始星系
+                    # 检查起始星系是否还有物品需要运输
+                    source_assets = player['assets'].get(source_system, {})
+                    has_items_in_source = (
+                        source_assets.get('ores') or 
+                        source_assets.get('minerals') or 
+                        source_assets.get('ships') or
+                        source_assets.get('salvage')
+                    )
+
+                    if not has_items_in_source:
+                        # 起始星系没有物品了，运输任务完成，停在目标星系
+                        transport['status'] = '已完成'
+                        self.save_players()
+                        logger.info(f"运输任务完成：{source_system} -> {target_system}，起始星系已无物品")
+                        break
+
+                    # 返回起始星系继续运输
                     transport['status'] = f'返回{source_system}'
                     self.save_players()
                     
@@ -2337,7 +2705,7 @@ class SGDGamePlugin(Star):
                             'total_steps': len(path) - 1,
                             'current': target_system,
                             'start_time': time.time(),
-                            'jump_time': self.calculate_jump_time(ship['name']) if ship else 20
+                            'jump_time': self.calculate_jump_time(ship_data_info['name']) if ship_data_info else 20
                         }
                         self.save_players()
                         logger.info(f"运输任务：开始返回{source_system}")
@@ -2350,6 +2718,54 @@ class SGDGamePlugin(Star):
                 import traceback
                 logger.error(traceback.format_exc())
                 await asyncio.sleep(10)  # 出错后等待更长时间
+        
+        # 循环结束后的清理工作
+        if transport_completed:
+            try:
+                # 使用内存中的玩家数据
+                if self.players and user_id in self.players:
+                    player = self.players[user_id]
+                    transport = player.get('transporting')
+                    
+                    if transport:
+                        # 获取运输舰船数据
+                        ship_data_info = transport.get('ship_data', {})
+                        current_location = player['location'].replace('小行星带', '')
+                        
+                        # 清除运输状态
+                        player['transporting'] = None
+                        
+                        # 清除导航状态（如果有）
+                        if player.get('navigating'):
+                            player['navigating'] = None
+                        
+                        # 设置玩家状态为待机
+                        player['status'] = '待机'
+                        
+                        # 将运输舰船保存回当前所在星系的机库
+                        if ship_data_info:
+                            if current_location not in player['assets']:
+                                player['assets'][current_location] = {'minerals': {}, 'ores': {}, 'ships': [], 'salvage': {}}
+
+                            # 检查机库中是否已有该舰船（避免重复）
+                            existing_ship = None
+                            for ship in player['assets'][current_location].get('ships', []):
+                                if ship['id'] == ship_data_info['id']:
+                                    existing_ship = ship
+                                    break
+                            
+                            if not existing_ship:
+                                player['assets'][current_location]['ships'].append(ship_data_info)
+                                logger.info(f"运输完成：舰船 {ship_data_info['name']} 已保存到 {current_location} 机库")
+                        
+                        # 保存数据
+                        self.players[user_id] = player
+                        self.save_players()
+                        logger.info(f"运输任务：玩家 {user_id} 已完成清理")
+            except Exception as e:
+                logger.error(f"运输任务完成清理时出错: {e}")
+                import traceback
+                logger.error(traceback.format_exc())
 
     def settle_navigation(self, player: Dict) -> str:
         if not player.get('navigating'):
@@ -2407,7 +2823,7 @@ class SGDGamePlugin(Star):
         
         # 添加到目标星系
         if target_system not in player['assets']:
-            player['assets'][target_system] = {"minerals": {}, "ores": {}, "ships": []}
+            player['assets'][target_system] = {"minerals": {}, "ores": {}, "ships": [], "salvage": {}}
         if 'ships' not in player['assets'][target_system]:
             player['assets'][target_system]['ships'] = []
         player['assets'][target_system]['ships'].append(current_ship)
@@ -2447,9 +2863,14 @@ class SGDGamePlugin(Star):
             )
             return
         
-        if player['status'] != '待机':
+        # 挖矿可以与制造同时进行，只需要检查是否在挖矿、刷怪或导航中
+        if player['status'] in ['挖矿中', '刷怪中', '导航中', '运输中']:
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法挖矿")
             return
+        
+        # 如果状态是制造中，将其重置为待机（制造是后台活动）
+        if player['status'] == '制造中':
+            player['status'] = '待机'
         
         ship = self.get_player_ship(player)
         if not ship:
@@ -2465,6 +2886,16 @@ class SGDGamePlugin(Star):
         security_value = self.SYSTEM_SECURITY.get(system, 1.0)  # 数值型安等
         security_type = self.get_system_security_type(system)  # 字符串类型（用于显示）
         
+        # 00区检查：必须有玩家建筑才能挖矿
+        if security_value < 0:
+            if system not in self.PLAYER_STRUCTURES:
+                yield event.plain_result(
+                    f"❌ {system}是00区，没有玩家建筑可以停靠\n"
+                    f"00区挖矿需要有玩家建筑才能存储矿石\n"
+                    f"请先建造或寻找有玩家建筑的星系"
+                )
+                return
+        
         player['status'] = '挖矿中'
         player['mining'] = {
             "start_time": time.time(),
@@ -2474,9 +2905,8 @@ class SGDGamePlugin(Star):
             "ship_name": ship['name'],
             "last_settle_time": time.time(),  # 上次结算时间
             "total_volume": 0,  # 累计已结算矿量
-            "phase": "mining",  # 当前阶段: mining(挖矿中), unloading(去卸货), returning(返回挖矿点)
+            "phase": "mining",  # 当前阶段: mining(挖矿中)
             "ore_in_hold": 0,  # 当前矿舱中的矿石体积(m³)
-            "target_station": None,  # 目标NPC空间站(00区需要)
         }
         self.save_players()
         
@@ -2520,23 +2950,14 @@ class SGDGamePlugin(Star):
             # 高安/低安，直接存本地
             return mining_system, 0, ""
         
-        # 00区，先检查是否有玩家建筑
+        # 00区，检查是否有玩家建筑（没有玩家建筑不能挖矿，这里只是备用检查）
         if mining_system in self.PLAYER_STRUCTURES:
             structure = self.PLAYER_STRUCTURES[mining_system]
             # 如果有玩家建筑，直接存到该星系（暂不需要权限检查，后续可扩展）
             return mining_system, 0, f"\n🏢 使用玩家建筑：{structure.get('name', '未知建筑')}\n"
         
-        # 00区没有玩家建筑，需要找到最近的NPC空间站
-        nearest_npc = self.find_nearest_npc_station(mining_system)
-        if not nearest_npc:
-            # 找不到NPC空间站，无法存储（这种情况不应该发生）
-            return mining_system, 0, ""
-        
-        # 使用导航功能计算往返导航时间
-        nav_time_one_way = self._estimate_nav_time(mining_system, nearest_npc, ship_name)
-        round_trip_time = nav_time_one_way * 2  # 往返
-        
-        return nearest_npc, round_trip_time, f"\n📦 矿石已转运至最近的NPC空间站：{nearest_npc}\n   （往返导航时间约{round_trip_time/60:.1f}分钟）\n"
+        # 00区没有玩家建筑，返回空（这种情况不应该发生，因为开始挖矿时会检查）
+        return mining_system, 0, ""
     
     def _estimate_nav_time(self, from_system: str, to_system: str, ship_name: str = None) -> float:
         """估算两个星系之间的导航时间（秒）
@@ -2564,11 +2985,8 @@ class SGDGamePlugin(Star):
 
     def auto_settle_mining(self, player: Dict) -> float:
         """自动结算挖矿（矿舱满时），返回结算的矿物体积
-        
-        完整状态机：
-        - mining: 正在挖矿，积累矿石到矿舱
-        - unloading: 矿舱满，启动导航去空间站卸货（使用真实导航）
-        - returning: 卸货完成，启动导航回挖矿点（使用真实导航）
+
+        00区挖矿必须有玩家建筑，所有矿石都直接存储在本地，不需要导航运输
         """
         if not player.get('mining'):
             return 0
@@ -2602,77 +3020,19 @@ class SGDGamePlugin(Star):
             
             # 检查矿舱是否满了
             if mining['ore_in_hold'] >= ore_hold_capacity:
-                # 矿舱满了
-                if security >= 0 or mining_system in self.PLAYER_STRUCTURES:
-                    # 高安/低安/有玩家建筑：立即卸货（无导航）
-                    self._unload_mining_ore(player, storage_system)
-                    mining['last_settle_time'] = current_time
-                    mining['ore_in_hold'] = 0
-                else:
-                    # 00区无玩家建筑：启动真实导航去NPC空间站
-                    path = self.find_path(current_location, storage_system)
-                    if path:
-                        mining['phase'] = 'unloading'
-                        mining['target_station'] = storage_system
-                        player['status'] = '导航中'
-                        player['navigating'] = {
-                            'target': storage_system,
-                            'path': path,
-                            'current_step': 0,
-                            'total_steps': len(path) - 1,
-                            'start_time': current_time,
-                            'jump_time': self.calculate_jump_time(ship_name),
-                            'current': current_location,
-                            'mining_unload': True  # 标记这是挖矿卸货导航
-                        }
+                # 矿舱满了，立即卸货（高安/低安/00区有玩家建筑都是立即卸货）
+                self._unload_mining_ore(player, storage_system)
+                mining['last_settle_time'] = current_time
+                mining['ore_in_hold'] = 0
             
             mining['last_settle_time'] = current_time
                 
-        elif phase == 'unloading':
-            # 正在导航去空间站卸货
-            if not player.get('navigating'):
-                # 导航已完成，到达空间站
-                target_station = mining.get('target_station')
-                if target_station:
-                    self._unload_mining_ore(player, target_station)
-                    mining['ore_in_hold'] = 0
-                    
-                    # 启动返回导航
-                    path = self.find_path(player['location'], mining_system)
-                    if path:
-                        mining['phase'] = 'returning'
-                        player['status'] = '导航中'
-                        player['navigating'] = {
-                            'target': mining_system,
-                            'path': path,
-                            'current_step': 0,
-                            'total_steps': len(path) - 1,
-                            'start_time': current_time,
-                            'jump_time': self.calculate_jump_time(ship_name),
-                            'current': player['location'],
-                            'mining_return': True  # 标记这是挖矿返回导航
-                        }
-                    else:
-                        # 找不到返回路径，停留在空间站
-                        logger.warning(f"玩家 {player.get('name', '未知')} 挖矿后找不到返回{mining_system}的路径")
-                        mining['phase'] = 'mining'  # 强制回到mining阶段，但位置在空间站
-                        player['status'] = '待机'
-                else:
-                    # target_station为None，异常情况
-                    logger.error(f"玩家 {player.get('name', '未知')} 挖矿unloading阶段target_station为None")
-                    mining['phase'] = 'mining'
-                    player['status'] = '挖矿中'
-            # 否则继续导航中，由导航系统自动处理
-            
-        elif phase == 'returning':
-            # 正在导航回挖矿点
-            if not player.get('navigating'):
-                # 导航已完成，回到挖矿点
-                mining['phase'] = 'mining'
-                mining['target_station'] = None
-                player['status'] = '挖矿中'
-                mining['last_settle_time'] = current_time
-            # 否则继续导航中，由导航系统自动处理
+        elif phase == 'unloading' or phase == 'returning':
+            # 这些阶段不应该再出现（00区挖矿必须有玩家建筑，不需要导航）
+            # 如果出现了，强制回到mining阶段
+            logger.warning(f"玩家 {player.get('name', '未知')} 挖矿出现意外的{phase}阶段，强制恢复")
+            mining['phase'] = 'mining'
+            player['status'] = '挖矿中'
         
         self.save_players()
         return 0
@@ -2716,8 +3076,8 @@ class SGDGamePlugin(Star):
         actual_transfer_volume = min(ore_volume, available_volume)
         
         # 获取该星系的矿石分布
-        security = mining['security']
-        ore_distribution = self.get_ore_distribution(security)
+        security_type = mining.get('security_type', 'high')  # 使用字符串类型的安等
+        ore_distribution = self.get_ore_distribution(security_type)
         
         # 确保舰船矿舱存在
         if 'ore_hold' not in ship:
@@ -2748,20 +3108,24 @@ class SGDGamePlugin(Star):
         ore_volume = mining.get('ore_in_hold', 0)
         
         if ore_volume <= 0:
+            logger.warning(f"_unload_mining_ore: ore_volume <= 0 ({ore_volume})，跳过存储")
             return
         
-        system = mining['system']
-        security = mining['security']
+        security_type = mining.get('security_type', 'high')  # 使用字符串类型的安等
+        logger.info(f"_unload_mining_ore: 存储 {ore_volume:.2f}m³ 矿石到 {storage_system}，安等类型: {security_type}")
         
         # 确保存储星系资产存在
         if storage_system not in player['assets']:
-            player['assets'][storage_system] = {"minerals": {}, "ores": {}, "ships": []}
+            player['assets'][storage_system] = {"minerals": {}, "ores": {}, "ships": [], "salvage": {}}
+            logger.info(f"_unload_mining_ore: 创建 {storage_system} 资产结构")
         if 'ores' not in player['assets'][storage_system]:
             player['assets'][storage_system]['ores'] = {}
         
         # 根据矿石分布结算
-        ore_distribution = self.get_ore_distribution(security)
+        ore_distribution = self.get_ore_distribution(security_type)
+        logger.info(f"_unload_mining_ore: 矿石分布: {ore_distribution}")
         
+        stored_ores = []
         for ore_name, ratio in ore_distribution.items():
             ore_amount = ore_volume * ratio
             ore_data = self.ORES_DATA[ore_name]
@@ -2771,17 +3135,20 @@ class SGDGamePlugin(Star):
                 if ore_name not in player['assets'][storage_system]['ores']:
                     player['assets'][storage_system]['ores'][ore_name] = 0
                 player['assets'][storage_system]['ores'][ore_name] += ore_units
+                stored_ores.append(f"{ore_name}: {ore_units:.2f}")
+        
+        logger.info(f"_unload_mining_ore: 已存储矿石: {stored_ores}")
+        logger.info(f"_unload_mining_ore: {storage_system} 当前ores: {player['assets'][storage_system]['ores']}")
         
         # 更新累计矿量
         mining['total_volume'] = mining.get('total_volume', 0) + ore_volume
+        # 清空矿舱中的矿石（已存入仓库）
+        mining['ore_in_hold'] = 0
 
     def final_settle_mining(self, player: Dict) -> str:
         """最终结算挖矿收益（停止挖矿时调用）
-        
-        根据当前阶段处理：
-        - mining: 结算矿舱中的矿石（如果在00区且矿舱有矿，需要手动处理）
-        - to_station: 导航中停止，矿石在船上，需要决定丢弃或保留
-        - back: 导航中停止，矿石已卸货，无损失
+
+        00区挖矿必须有玩家建筑，所有矿石都直接存储在本地，不需要导航运输
         """
         if not player.get('mining'):
             return ""
@@ -2801,60 +3168,20 @@ class SGDGamePlugin(Star):
         result_text = f"⛏️ 挖矿结算\n📍 挖矿地点：{mining_system}\n📍 当前位置：{current_location}\n⏱️ 总时长：{total_duration/60:.1f}分钟\n🚀 舰船：{ship_name}\n"
         
         # 处理不同阶段的停止
-        if phase == 'unloading':
-            # 正在导航去空间站卸货途中停止
-            if player.get('navigating'):
-                # 还在导航中，结算导航获取当前位置
-                self.settle_navigation(player)
-                current_location = player.get('location', current_location)
-                
-                # 导航还在进行中（未到达），矿石保留在船上
-                ore_in_hold = mining.get('ore_in_hold', 0)
-                if ore_in_hold > 0:
-                    result_text += f"\n⚠️ 导航去空间站途中停止\n"
-                    result_text += f"📍 当前停在：{current_location}\n"
-                    # 将矿石存入舰船矿舱（实际存储到ship.ore_hold）
-                    transferred = self._transfer_ore_to_ship_hold(player, mining)
-                    result_text += f"📦 矿石保留在船上矿舱中：{transferred:.2f}m³\n"
-                    remaining = mining.get('ore_in_hold', 0)
-                    if remaining > 0:
-                        result_text += f"💀 矿舱容量不足，矿石丢失：{remaining:.2f}m³\n"
-            else:
-                # 导航已完成（已经到达空间站），但阶段还没切换到returning
-                # 这种情况通常不会发生，但以防万一
-                if mining.get('ore_in_hold', 0) > 0:
-                    # 矿石还在，说明还没卸货，立即卸货
-                    target = mining.get('target_station', current_location)
-                    self._unload_mining_ore(player, target)
-                    result_text += f"\n✅ 已到达{target}，矿石已卸货\n"
-            
-        elif phase == 'returning':
-            # 正在返回挖矿点途中停止
-            if player.get('navigating'):
-                # 还在导航中，结算导航获取当前位置
-                self.settle_navigation(player)
-                current_location = player.get('location', current_location)
-                result_text += f"\n✅ 已卸货完成，返回途中停止\n"
-                result_text += f"📍 当前停在：{current_location}\n"
-            else:
-                # 导航已完成，已经回到挖矿点
-                result_text += f"\n✅ 已回到挖矿点{mining_system}\n"
+        if phase == 'unloading' or phase == 'returning':
+            # 这些阶段不应该再出现（00区挖矿必须有玩家建筑，不需要导航）
+            # 如果出现了，强制回到mining阶段处理
+            logger.warning(f"玩家 {player.get('name', '未知')} 停止挖矿时出现意外的{phase}阶段")
+            phase = 'mining'
         
         # 结算矿舱中剩余的矿石（如果在mining阶段停止）
         if phase == 'mining':
             final_ore = mining.get('ore_in_hold', 0)
             if final_ore > 0:
-                if security >= 0 or mining_system in self.PLAYER_STRUCTURES:
-                    # 高安/低安/有玩家建筑：可以存到本地
-                    self._unload_mining_ore(player, mining_system)
-                    result_text += f"\n📦 矿舱矿石已存入{mining_system}：{final_ore:.2f}m³\n"
-                else:
-                    # 00区无玩家建筑：矿石保留在船上
-                    transferred = self._transfer_ore_to_ship_hold(player, mining)
-                    result_text += f"\n📦 矿石保留在船上矿舱中：{transferred:.2f}m³\n"
-                    remaining = mining.get('ore_in_hold', 0)
-                    if remaining > 0:
-                        result_text += f"💀 矿舱容量不足，矿石丢失：{remaining:.2f}m³\n"
+                # 高安/低安/00区有玩家建筑：都可以存到本地
+                # 00区没有玩家建筑的情况在开始挖矿时已经检查，不会到这里
+                self._unload_mining_ore(player, mining_system)
+                result_text += f"\n📦 矿舱矿石已存入{mining_system}：{final_ore:.2f}m³\n"
         
         # 统计总收益
         total_volume = mining.get('total_volume', 0)
@@ -2947,42 +3274,55 @@ class SGDGamePlugin(Star):
             return
         
         ores = player['assets'][location].get('ores', {})
-        if not ores:
-            yield event.plain_result(f"❌ 在{location}没有原矿")
+        salvage = player['assets'][location].get('salvage', {})
+        
+        if not ores and not salvage:
+            yield event.plain_result(f"❌ 在{location}没有可精炼的物品（原矿或残骸）")
             return
         
         # 解析参数
+        target_ores = {}
+        target_salvage = {}
+        
         if len(args) == 0:
-            # 精炼所有
+            # 精炼所有原矿和残骸
             target_ores = ores.copy()
+            target_salvage = salvage.copy()
         elif len(args) == 1:
-            # 精炼指定原矿的所有数量
-            ore_name = args[0]
-            if ore_name not in ores:
-                yield event.plain_result(f"❌ 没有 {ore_name}")
+            # 精炼指定物品的所有数量
+            item_name = args[0]
+            if item_name in ores:
+                target_ores = {item_name: ores[item_name]}
+            elif item_name in salvage:
+                target_salvage = {item_name: salvage[item_name]}
+            else:
+                yield event.plain_result(f"❌ 没有 {item_name}")
                 return
-            target_ores = {ore_name: ores[ore_name]}
         elif len(args) >= 2:
             # 精炼指定数量
-            ore_name = args[0]
+            item_name = args[0]
             try:
-                amount = float(args[1])
+                amount = int(args[1])
             except ValueError:
-                yield event.plain_result("❌ 数量必须是数字")
+                yield event.plain_result("❌ 数量必须是整数")
                 return
             
-            if ore_name not in ores:
-                yield event.plain_result(f"❌ 没有 {ore_name}")
+            if item_name in ores:
+                if ores[item_name] < amount:
+                    yield event.plain_result(f"❌ {item_name} 只有 {ores[item_name]:.2f} 单位")
+                    return
+                target_ores = {item_name: float(amount)}
+            elif item_name in salvage:
+                if salvage[item_name] < amount:
+                    yield event.plain_result(f"❌ {item_name} 只有 {salvage[item_name]} 个")
+                    return
+                target_salvage = {item_name: amount}
+            else:
+                yield event.plain_result(f"❌ 没有 {item_name}")
                 return
-            
-            if ores[ore_name] < amount:
-                yield event.plain_result(f"❌ {ore_name} 只有 {ores[ore_name]:.2f} 单位")
-                return
-            
-            target_ores = {ore_name: amount}
         
-        if not target_ores:
-            yield event.plain_result("❌ 没有可精炼的原矿")
+        if not target_ores and not target_salvage:
+            yield event.plain_result("❌ 没有可精炼的物品")
             return
         
         if 'minerals' not in player['assets'][location]:
@@ -2992,6 +3332,7 @@ class SGDGamePlugin(Star):
         result_text = f"🔥 精炼完成\n📍 地点：{location}\n\n"
         total_minerals = {}
         
+        # 精炼原矿
         for ore_name, ore_units in target_ores.items():
             if ore_name not in self.ORES_DATA:
                 continue
@@ -3018,10 +3359,43 @@ class SGDGamePlugin(Star):
             if ores[ore_name] <= 0:
                 del ores[ore_name]
         
+        # 精炼残骸
+        for salvage_name, salvage_count in target_salvage.items():
+            # 查找对应的残骸数据
+            salvage_data = None
+            for level, data in self.RAT_SALVAGE.items():
+                if data['name'] == salvage_name:
+                    salvage_data = data
+                    break
+            
+            if not salvage_data:
+                continue
+            
+            result_text += f"📦 {salvage_name}：{salvage_count}个\n"
+            
+            for mineral_name, amount_per_unit in salvage_data['minerals'].items():
+                if amount_per_unit <= 0:
+                    continue
+                produced = salvage_count * amount_per_unit
+                if mineral_name not in minerals:
+                    minerals[mineral_name] = 0
+                minerals[mineral_name] += produced
+                
+                if mineral_name not in total_minerals:
+                    total_minerals[mineral_name] = 0
+                total_minerals[mineral_name] += produced
+                
+                result_text += f"   → {mineral_name}：+{produced:.0f}\n"
+            
+            salvage[salvage_name] -= salvage_count
+            if salvage[salvage_name] <= 0:
+                del salvage[salvage_name]
+        
         if total_minerals:
             result_text += "\n📊 精炼总计：\n"
             for mineral_name, amount in sorted(total_minerals.items()):
-                result_text += f"  {mineral_name}：{amount:.2f}单位\n"
+                if amount > 0:
+                    result_text += f"  {mineral_name}：{amount:.0f}单位\n"
         
         self.save_players()
         yield event.plain_result(result_text)
@@ -3030,18 +3404,23 @@ class SGDGamePlugin(Star):
     @filter.command("游戏制造")
     async def manufacturing(self, event: AstrMessageEvent):
         args = event.message_str.split()[1:]
-        
+
         if len(args) == 0:
-            yield event.plain_result("❌ 用法：/游戏制造 <舰船> [数量]")
+            yield event.plain_result("❌ 用法：\n/游戏制造 <舰船> - 查看制造需求\n/游戏制造 <舰船> <数量> - 开始制造")
             return
-        
+
         ship_name = args[0]
-        
+
         if ship_name not in self.MANUFACTURING_RECIPES:
             available = ", ".join(self.MANUFACTURING_RECIPES.keys())
             yield event.plain_result(f"❌ 无法制造 {ship_name}\n可用舰船：{available}")
             return
-        
+
+        # 判断是查看还是制造
+        # 1个参数：查看需求（默认1艘）
+        # 2个参数：开始制造
+        view_only = len(args) == 1
+
         # 获取数量
         quantity = 1
         if len(args) >= 2:
@@ -3053,135 +3432,197 @@ class SGDGamePlugin(Star):
             except ValueError:
                 yield event.plain_result("❌ 数量必须是整数")
                 return
-        
+
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
-        
-        # 如果只是查看需求（数量为0或不输入数量且不在空间站）
+
+        # 确保manufacturing是列表
+        if not isinstance(player.get('manufacturing'), list):
+            player['manufacturing'] = []
+
         location = player['location'].replace('小行星带', '')
-        
+
         # 显示制造需求
         recipe = self.MANUFACTURING_RECIPES[ship_name]
         time_seconds = self.MANUFACTURING_TIME[ship_name]
-        
+
         # 计算总需求
         total_recipe = {k: v * quantity for k, v in recipe.items()}
         total_time = time_seconds * quantity
-        
+
         text = f"🔧 {ship_name} 制造信息\n\n"
         text += f"📦 数量：{quantity}艘\n"
         text += f"⏱️ 时间：{self.format_time(total_time)}\n\n"
         text += "📋 所需矿物：\n"
         for mineral, amount in total_recipe.items():
             text += f"  {mineral}：{amount:,.0f}\n"
-        
-        # 如果玩家只想查看信息，到这里就结束
-        if player['status'] != '待机':
-            text += "\n⚠️ 当前状态无法制造"
-            yield event.plain_result(text)
-            return
-        
+
+        # 检查是否可以制造
+        can_manufacture = True
+        reasons = []
+
+        # 制造是后台活动，不检查玩家状态（可以在挖矿、刷怪、导航时进行）
+        # 只需要检查是否在空间站
         if location not in self.NPC_STATIONS:
-            text += "\n⚠️ 必须在NPC空间站才能制造"
-            yield event.plain_result(text)
-            return
-        
+            can_manufacture = False
+            reasons.append(f"⚠️ 必须在NPC空间站才能制造（当前在{location}）")
+
         # 检查材料
         minerals = player['assets'].get(location, {}).get('minerals', {})
         missing = []
         for mineral, amount in total_recipe.items():
             if minerals.get(mineral, 0) < amount:
                 missing.append(f"{mineral} (需要{amount:,.0f}, 有{minerals.get(mineral, 0):.0f})")
-        
+
         if missing:
-            text += "\n❌ 材料不足：\n" + "\n".join(missing)
+            can_manufacture = False
+            reasons.append("❌ 材料不足：\n" + "\n".join(missing))
+
+        if reasons:
+            text += "\n" + "\n".join(reasons)
             yield event.plain_result(text)
             return
-        
+
+        # 如果只查看（没有输入数量参数），显示信息后返回
+        if view_only:
+            text += f"\n💡 输入 '/游戏制造 {ship_name} <数量>' 开始制造"
+            yield event.plain_result(text)
+            return
+
         # 扣除材料
         for mineral, amount in total_recipe.items():
             minerals[mineral] -= amount
             if minerals[mineral] <= 0:
                 del minerals[mineral]
-        
-        # 开始制造
-        player['status'] = '制造中'
-        player['manufacturing'] = {
+
+        # 开始制造 - 添加到制造队列
+        # 制造是后台进行的活动，不占用玩家状态
+        manufacturing_task = {
             "ship": ship_name,
             "quantity": quantity,
             "start_time": time.time(),
             "duration": total_time,
             "location": location,
         }
+        player['manufacturing'].append(manufacturing_task)
         self.save_players()
-        
+
+        task_count = len(player['manufacturing'])
         text += f"\n✅ 开始制造 {quantity}艘 {ship_name}"
+        text += f"\n📋 当前制造队列：{task_count}个任务"
+        text += f"\n💡 制造是后台进行的，不影响其他活动"
         yield event.plain_result(text)
 
     @filter.command("游戏制造状态")
     async def manufacturing_status(self, event: AstrMessageEvent):
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
-        
-        result = self.settle_manufacturing(player)
-        if result:
-            yield event.plain_result(result)
-            return
-        
-        if not player.get('manufacturing'):
-            yield event.plain_result("📍 当前没有进行制造")
-            return
-        
-        mfg = player['manufacturing']
-        elapsed = time.time() - mfg['start_time']
-        remaining = max(0, mfg['duration'] - elapsed)
-        progress = min(100, elapsed / mfg['duration'] * 100)
-        
-        text = f"""🔧 制造状态
 
-🚀 制造：{mfg['ship']} ×{mfg.get('quantity', 1)}
-📍 地点：{mfg['location']}
-📊 进度：{progress:.1f}%
-⏱️ 剩余：{self.format_time(remaining)}"""
-        
+        # 先结算制造，获取完成和进行中的任务
+        completed_text, remaining_tasks = self.settle_manufacturing_with_remaining(player)
+
+        # 确保manufacturing是列表
+        if not isinstance(player.get('manufacturing'), list):
+            player['manufacturing'] = []
+
+        # 构建输出文本
+        text = ""
+
+        # 显示完成的任务
+        if completed_text:
+            text += completed_text + "\n\n"
+
+        # 显示进行中的任务
+        if remaining_tasks:
+            text += "🔧 制造状态\n"
+            text += f"📋 当前制造队列：{len(remaining_tasks)}个任务\n"
+            text += "=" * 30 + "\n"
+
+            for idx, mfg in enumerate(remaining_tasks, 1):
+                elapsed = time.time() - mfg['start_time']
+                remaining = max(0, mfg['duration'] - elapsed)
+                progress = min(100, elapsed / mfg['duration'] * 100)
+
+                text += f"\n[{idx}] 🚀 {mfg['ship']} ×{mfg.get('quantity', 1)}\n"
+                text += f"    📍 {mfg['location']}\n"
+                text += f"    📊 进度：{progress:.1f}%\n"
+                text += f"    ⏱️ 剩余：{self.format_time(remaining)}"
+        elif not completed_text:
+            text = "📍 当前没有进行制造"
+
         yield event.plain_result(text)
 
     def settle_manufacturing(self, player: Dict) -> str:
-        if not player.get('manufacturing'):
-            return ""
-        
-        mfg = player['manufacturing']
-        elapsed = time.time() - mfg['start_time']
-        
-        if elapsed >= mfg['duration']:
-            ship_name = mfg['ship']
-            quantity = mfg.get('quantity', 1)
-            location = mfg['location']
-            
-            if location not in player['assets']:
-                player['assets'][location] = {"minerals": {}, "ores": {}, "ships": []}
-            if 'ships' not in player['assets'][location]:
-                player['assets'][location]['ships'] = []
-            
-            new_ships = []
-            for i in range(quantity):
-                new_ship = {
-                    "id": player['next_ship_id'],
-                    "name": ship_name,
-                    "hp_percent": 100,
-                    "cargo": {}  # 每条舰船独立的货柜
-                }
-                player['assets'][location]['ships'].append(new_ship)
-                new_ships.append(str(player['next_ship_id']))
-                player['next_ship_id'] += 1
-            
-            player['status'] = '待机'
-            player['manufacturing'] = None
+        """结算制造任务，处理所有已完成的制造（兼容旧接口）"""
+        completed_text, _ = self.settle_manufacturing_with_remaining(player)
+        return completed_text
+
+    def settle_manufacturing_with_remaining(self, player: Dict) -> tuple:
+        """结算制造任务，返回(完成信息, 进行中任务列表)"""
+        # 确保manufacturing是列表
+        if not isinstance(player.get('manufacturing'), list):
+            player['manufacturing'] = []
+            return "", []
+
+        if not player['manufacturing']:
+            return "", []
+
+        completed_tasks = []
+        remaining_tasks = []
+        current_time = time.time()
+
+        for mfg in player['manufacturing']:
+            elapsed = current_time - mfg['start_time']
+
+            if elapsed >= mfg['duration']:
+                # 制造完成
+                ship_name = mfg['ship']
+                quantity = mfg.get('quantity', 1)
+                location = mfg['location']
+
+                if location not in player['assets']:
+                    player['assets'][location] = {"minerals": {}, "ores": {}, "ships": [], "salvage": {}}
+                if 'ships' not in player['assets'][location]:
+                    player['assets'][location]['ships'] = []
+
+                new_ships = []
+                for i in range(quantity):
+                    new_ship = {
+                        "id": player['next_ship_id'],
+                        "name": ship_name,
+                        "hp_percent": 100,
+                        "cargo": {}  # 每条舰船独立的货柜
+                    }
+                    player['assets'][location]['ships'].append(new_ship)
+                    new_ships.append(str(player['next_ship_id']))
+                    player['next_ship_id'] += 1
+
+                completed_tasks.append({
+                    'ship': ship_name,
+                    'quantity': quantity,
+                    'location': location,
+                    'ids': new_ships
+                })
+            else:
+                # 制造未完成，保留在队列中
+                remaining_tasks.append(mfg)
+
+        # 更新制造队列
+        player['manufacturing'] = remaining_tasks
+
+        # 注意：制造是后台活动，不占用玩家状态
+        # 不需要在这里更新玩家状态
+
+        completed_text = ""
+        if completed_tasks:
             self.save_players()
-            
-            return f"🎉 制造完成！\n🚀 获得 {quantity}艘 {ship_name}\n📍 已存入 {location} 机库\nID：{', '.join(new_ships)}"
-        
-        return ""
+            # 构建完成信息
+            completed_text = "🎉 制造完成！\n"
+            for task in completed_tasks:
+                completed_text += f"\n🚀 获得 {task['quantity']}艘 {task['ship']}\n"
+                completed_text += f"📍 已存入 {task['location']} 机库"
+
+        return completed_text, remaining_tasks
 
     def format_time(self, seconds: float) -> str:
         """格式化时间显示"""
@@ -3272,59 +3713,154 @@ class SGDGamePlugin(Star):
             system = player['location'].replace('小行星带', '')
         
         ships = player['assets'].get(system, {}).get('ships', [])
-        
+
         if not ships:
             yield event.plain_result(f"📦 {system} 机库\n\n暂无舰船")
             return
-        
-        text = f"📦 {system} 机库\n\n"
+
+        equipped_ship_id = player.get('ship_id')
+
+        # 分类舰船
+        equipped_ship = None  # 已登船的船（只能有一艘）
+        non_empty_ships = []  # 其他有货的船（未登船）
+        empty_ship_counts = {}  # 空船按名称计数（不包含已登船的）
+
         for ship in ships:
-            status = "🚀 已装备" if ship['id'] == player.get('ship_id') else "⚓ 待命"
-            text += f"ID:{ship['id']} {ship['name']} (血量:{ship.get('hp_percent', 100)}%) {status}\n"
-        
-        text += "\n使用 /游戏换船 <舰船名称> 更换舰船"
+            is_equipped = ship['id'] == equipped_ship_id
+            ship_name = ship['name']
+
+            # 检查货柜和矿舱是否为空
+            cargo = ship.get('cargo', {})
+            ore_hold = ship.get('ore_hold', {})
+            has_cargo = cargo and sum(cargo.values()) > 0
+            has_ore = ore_hold and sum(ore_hold.values()) > 0
+
+            if is_equipped:
+                # 已登船的船（只能有一艘）
+                equipped_ship = ship
+            elif has_cargo or has_ore:
+                # 有货的船（未登船）
+                non_empty_ships.append(ship)
+            else:
+                # 空船（未登船）
+                if ship_name not in empty_ship_counts:
+                    empty_ship_counts[ship_name] = 0
+                empty_ship_counts[ship_name] += 1
+
+        text = f"📦 {system} 机库\n\n"
+
+        # 辅助函数：获取货舱容量显示（返回列表，每个元素一行）
+        def get_cargo_display_lines(ship):
+            ship_name = ship['name']
+            ship_data = self.SHIPS_DATA.get(ship_name, {})
+            cargo_capacity = ship_data.get('cargo', 0)
+            ore_hold_capacity = ship_data.get('ore_hold', 0)
+            
+            cargo = ship.get('cargo', {})
+            ore_hold = ship.get('ore_hold', {})
+            cargo_used = sum(cargo.values()) if cargo else 0
+            ore_used = sum(ore_hold.values()) if ore_hold else 0
+            
+            lines = []
+            if cargo_used > 0 and cargo_capacity > 0:
+                lines.append(f"货柜舱：{cargo_used:.0f}m³/{cargo_capacity:.0f}m³")
+            if ore_used > 0 and ore_hold_capacity > 0:
+                lines.append(f"矿舱：{ore_used:.0f}m³/{ore_hold_capacity:.0f}m³")
+            
+            return lines
+
+        # 1. 先显示已登船的船（最优先，只能有一艘）
+        if equipped_ship:
+            cargo_lines = get_cargo_display_lines(equipped_ship)
+            text += f"ID:{equipped_ship['id']} {equipped_ship['name']} 🚀 已登船\n"
+            for line in cargo_lines:
+                text += f"  {line}\n"
+
+        # 2. 再显示其他有货的船（未登船）
+        for ship in non_empty_ships:
+            cargo_lines = get_cargo_display_lines(ship)
+            text += f"ID:{ship['id']} {ship['name']}\n"
+            for line in cargo_lines:
+                text += f"  {line}\n"
+
+        # 3. 最后显示其他空船（未登船，折叠显示）
+        for ship_name, count in empty_ship_counts.items():
+            if count > 1:
+                text += f"{ship_name} ×{count}\n"
+            else:
+                text += f"{ship_name}\n"
+
+        text += "\n使用 /游戏换船 <舰船名称或ID> 更换舰船（同名空船用名称，有货船用ID）"
         yield event.plain_result(text)
 
     @filter.command("游戏换船")
     async def change_ship(self, event: AstrMessageEvent):
         args = event.message_str.split()[1:]
-        
+
         if len(args) < 1:
-            yield event.plain_result("❌ 用法：/游戏换船 <舰船名称>")
+            yield event.plain_result("❌ 用法：/游戏换船 <舰船名称或ID>\n说明：可以通过舰船名称或ID换船，同名舰船建议用ID")
             return
-        
-        ship_name = args[0]
-        
+
+        ship_identifier = args[0]
+
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
-        
-        if player['status'] != '待机':
+
+        # 换船可以与制造同时进行，只需要检查是否在挖矿、刷怪或导航中
+        if player['status'] in ['挖矿中', '刷怪中', '导航中', '运输中']:
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法换船")
             return
-        
+
+        # 如果状态是制造中，将其重置为待机（制造是后台活动）
+        if player['status'] == '制造中':
+            player['status'] = '待机'
+
         location = player['location'].replace('小行星带', '')
-        
+
         # 检查是否在空间站
         if location not in self.NPC_STATIONS:
             yield event.plain_result("❌ 必须在空间站才能换船")
             return
-        
-        # 查找指定名称的舰船
+
+        # 查找指定名称或ID的舰船
         ships = player['assets'].get(location, {}).get('ships', [])
         target_ship = None
-        for ship in ships:
-            if ship['name'] == ship_name:
-                target_ship = ship
-                break
-        
+
+        # 先尝试按ID查找（输入是纯数字）
+        if ship_identifier.isdigit():
+            ship_id = int(ship_identifier)
+            for ship in ships:
+                if ship['id'] == ship_id:
+                    target_ship = ship
+                    break
+        else:
+            # 按名称查找，优先选择货柜和矿舱都空的船
+            empty_ships = []
+            non_empty_ships = []
+            for ship in ships:
+                if ship['name'] == ship_identifier:
+                    cargo = ship.get('cargo', {})
+                    ore_hold = ship.get('ore_hold', {})
+                    has_cargo = cargo and sum(cargo.values()) > 0
+                    has_ore = ore_hold and sum(ore_hold.values()) > 0
+                    if not has_cargo and not has_ore:
+                        empty_ships.append(ship)
+                    else:
+                        non_empty_ships.append(ship)
+            # 优先使用空船
+            if empty_ships:
+                target_ship = empty_ships[0]
+            elif non_empty_ships:
+                target_ship = non_empty_ships[0]
+
         if not target_ship:
-            yield event.plain_result(f"❌ 在{location}机库中没有{ship_name}")
+            yield event.plain_result(f"❌ 在{location}机库中没有{ship_identifier}")
             return
-        
+
         player['ship_id'] = target_ship['id']
         self.save_players()
 
-        yield event.plain_result(f"✅ 已驾驶 {ship_name} (ID:{target_ship['id']})")
+        yield event.plain_result(f"✅ 已驾驶 {target_ship['name']} (ID:{target_ship['id']})")
 
     # ========== 刷怪系统 ==========
     @filter.command("游戏刷怪")
@@ -3333,10 +3869,18 @@ class SGDGamePlugin(Star):
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
 
-        # 结算之前的刷怪
+        # 检查是否已经在刷怪
         if player.get('ratting'):
-            self.final_settle_ratting(player)
-            self.save_players()
+            ratting = player['ratting']
+            duration = time.time() - ratting['start_time']
+            yield event.plain_result(
+                f"👾 已在刷怪中\n"
+                f"📍 地点：{ratting['system']} {self.RAT_DATA[ratting['level']]['name']}\n"
+                f"⏱️ 已进行：{duration/60:.1f}分钟\n"
+                f"🚀 舰船：{ratting['ship_name']}\n\n"
+                f"输入 /游戏停止刷怪 停止当前刷怪"
+            )
+            return
 
         # 获取当前星系安全等级
         system = player['location'].replace('小行星带', '')
@@ -3364,14 +3908,28 @@ class SGDGamePlugin(Star):
             yield event.plain_result("❌ 舰船已损毁，需要维修")
             return
 
-        # 检查状态
-        if player['status'] != '待机':
+        # 刷怪可以与制造同时进行，只需要检查是否在挖矿、刷怪或导航中
+        if player['status'] in ['挖矿中', '刷怪中', '导航中', '运输中']:
             yield event.plain_result(f"❌ 当前状态为{player['status']}，无法刷怪")
             return
+        
+        # 如果状态是制造中，将其重置为待机（制造是后台活动）
+        if player['status'] == '制造中':
+            player['status'] = '待机'
 
-        # 检查舰船是否适合当前星系的刷怪等级
-        recommended_ship = rat_data['ship']
-        if ship_name != recommended_ship:
+        # 计算战斗能力
+        ship_dps = self.SHIPS_DATA.get(ship_name, {}).get('dps', 0)
+        ship_hp = self.SHIPS_DATA.get(ship_name, {}).get('hp', 0)
+        monster_dps = rat_data['dps']
+        monster_hp = rat_data['hp']
+        
+        # 计算击杀时间和受到伤害
+        kill_time = monster_hp / ship_dps if ship_dps > 0 else float('inf')
+        damage_taken = monster_dps * kill_time
+        
+        # 检查是否能打过（舰船血量是否能承受伤害）
+        if damage_taken >= ship_hp:
+            recommended_ship = rat_data['ship']
             # 截取两位小数，不四舍五入
             security_truncated = int(security * 100) / 100
             text = f"👾 {system} 刷怪点\n\n"
@@ -3379,10 +3937,15 @@ class SGDGamePlugin(Star):
             text += f"👾 刷怪等级：{level}级 - {rat_data['name']}\n"
             text += f"🚀 当前舰船：{ship_name}\n"
             text += f"✅ 推荐舰船：{recommended_ship}\n\n"
-            text += f"⚠️ 当前舰船不适合刷此等级怪物\n"
-            text += f"请更换为{recommended_ship}后重试"
+            text += f"❌ 当前舰船无法击败此等级怪物\n"
+            text += f"预计受到{damage_taken:,.0f}点伤害，超过舰船血量{ship_hp:,}\n"
+            text += f"请更换更强的舰船后重试"
             yield event.plain_result(text)
             return
+        
+        # 计算预计刷怪时间（含维修延时）
+        repair_delay = self.REPAIR_DELAY.get(ship_name, 45)
+        cycle_time = kill_time + repair_delay
 
         # 开始刷怪
         current_time = time.time()
@@ -3398,12 +3961,12 @@ class SGDGamePlugin(Star):
         self.save_players()
 
         text = f"👾 开始刷怪\n\n"
-        text += f"📍 地点：{system} {rat_data['name']}\n"
+        text += f"📍 地点：{system} {rat_data['name']}（难度{level}）\n"
         text += f"🚀 舰船：{ship_name}\n"
         text += f"👾 怪物血量：{rat_data['hp']:,}\n"
-        text += f"💰 单只赏金：¥{rat_data['bounty']:,}\n"
-        if ship_name != recommended_ship:
-            text += f"⚠️ 警告：当前舰船{ship_name}不是推荐舰船{recommended_ship}，效率可能较低\n"
+        text += f"👾 怪物DPS：{rat_data['dps']}\n"
+        text += f"💰 异常赏金：¥{rat_data['bounty']:,}\n"
+        text += f"⏱️ 预计时间：{cycle_time/60:.1f}分钟/异常"
         yield event.plain_result(text)
 
     @filter.command("游戏停止刷怪")
@@ -3425,7 +3988,7 @@ class SGDGamePlugin(Star):
         yield event.plain_result(result)
 
     def auto_settle_ratting(self, player: Dict) -> int:
-        """自动结算20分钟内的赏金，返回结算金额"""
+        """自动结算刷怪收益（刷完一个异常就结算一次），返回结算金额"""
         if not player.get('ratting'):
             return 0
 
@@ -3434,15 +3997,10 @@ class SGDGamePlugin(Star):
         last_settle_time = ratting['last_settle_time']
         level = ratting['level']
         ship_name = ratting['ship_name']
-
-        # 计算距离上次结算的时间
-        duration = current_time - last_settle_time
-
-        # 如果不足20分钟，不结算
-        if duration < 1200:  # 20分钟 = 1200秒
-            return 0
+        system = ratting['system']
 
         rat_data = self.RAT_DATA[level]
+        salvage_data = self.RAT_SALVAGE[level]
 
         # 获取舰船DPS
         ship_dps = self.SHIPS_DATA.get(ship_name, {}).get('dps', 0)
@@ -3456,15 +4014,30 @@ class SGDGamePlugin(Star):
         repair_delay = self.REPAIR_DELAY.get(ship_name, 45)
         cycle_time = kill_time + repair_delay
 
-        # 计算这20分钟内实际完成的异常数量（考虑完整循环）
-        # 20分钟 = 1200秒
-        cycles = int(1200 / cycle_time)
+        # 计算距离上次结算的时间
+        duration = current_time - last_settle_time
+
+        # 计算完成的异常数量（刷完一个结算一个）
+        cycles = int(duration / cycle_time)
+
+        if cycles <= 0:
+            return 0
 
         # 计算赏金
         bounty = cycles * rat_data['bounty']
 
-        # 更新玩家数据 - 结算时间点往前推，保留未完成的循环时间
-        # 实际经过的完整循环时间
+        # 掉落残骸到仓库
+        if system not in player['assets']:
+            player['assets'][system] = {'minerals': {}, 'ores': {}, 'ships': [], 'salvage': {}}
+        if 'salvage' not in player['assets'][system]:
+            player['assets'][system]['salvage'] = {}
+        
+        salvage_name = salvage_data['name']
+        if salvage_name not in player['assets'][system]['salvage']:
+            player['assets'][system]['salvage'][salvage_name] = 0
+        player['assets'][system]['salvage'][salvage_name] += cycles
+
+        # 更新玩家数据 - 结算时间点往前推
         actual_cycle_time = cycles * cycle_time
         ratting['last_settle_time'] = last_settle_time + actual_cycle_time
         ratting['total_bounty'] += bounty
@@ -3491,6 +4064,7 @@ class SGDGamePlugin(Star):
         total_duration = current_time - ratting['start_time']
 
         rat_data = self.RAT_DATA[level]
+        salvage_data = self.RAT_SALVAGE[level]
 
         # 获取舰船DPS
         ship_dps = self.SHIPS_DATA.get(ship_name, {}).get('dps', 0)
@@ -3525,6 +4099,18 @@ class SGDGamePlugin(Star):
         # 总赏金 = 已结算 + 剩余
         total_bounty = ratting['total_bounty'] + remaining_bounty
 
+        # 掉落剩余残骸到仓库
+        if remaining_cycles > 0:
+            if system not in player['assets']:
+                player['assets'][system] = {'minerals': {}, 'ores': {}, 'ships': [], 'salvage': {}}
+            if 'salvage' not in player['assets'][system]:
+                player['assets'][system]['salvage'] = {}
+            
+            salvage_name = salvage_data['name']
+            if salvage_name not in player['assets'][system]['salvage']:
+                player['assets'][system]['salvage'][salvage_name] = 0
+            player['assets'][system]['salvage'][salvage_name] += remaining_cycles
+
         # 更新玩家数据
         player['wallet'] += remaining_bounty
         player['status'] = '待机'
@@ -3537,22 +4123,26 @@ class SGDGamePlugin(Star):
         result_text += f"🚀 舰船：{ship_name}\n\n"
         result_text += f"👾 完成异常数量：{total_cycles}个\n"
         result_text += f"💰 总赏金：¥{total_bounty:,}\n"
+        result_text += f"📦 掉落残骸：{salvage_data['name']} × {total_cycles}\n"
 
         return result_text
 
     async def _ratting_auto_settle_loop(self):
-        """自动结算循环：每60秒检查一次，为刷怪满20分钟或挖矿满舱的玩家自动结算"""
+        """自动结算循环：每60秒检查一次，为刷怪完成异常或挖矿满舱的玩家自动结算"""
         logger.info("自动结算循环已启动")
         while True:
             try:
                 await asyncio.sleep(60)  # 每60秒检查一次
-                # 重新加载最新数据，避免覆盖其他修改
-                latest_players = self.load_players()
+                # 使用内存中的数据，避免覆盖其他修改
+                # 如果内存中没有数据，才从文件加载
+                if not self.players:
+                    self.players = self.load_players()
+                latest_players = self.players.copy()  # 复制一份，避免直接修改内存中的数据
                 has_changes = False
 
                 for user_id, player in latest_players.items():
                     try:
-                        # 刷怪自动结算（每20分钟）
+                        # 刷怪自动结算（完成一个异常就结算）
                         if player.get('ratting'):
                             # 检查ratting数据结构是否完整
                             ratting = player['ratting']
@@ -3569,15 +4159,17 @@ class SGDGamePlugin(Star):
                         if player.get('mining'):
                             # 检查mining数据结构是否完整
                             mining = player['mining']
-                            required_fields = ['start_time', 'system', 'security', 'ship_name', 'last_settle_time', 'total_volume']
+                            required_fields = ['start_time', 'system', 'security', 'security_type', 'ship_name', 'last_settle_time', 'total_volume']
                             if not all(field in mining for field in required_fields):
                                 logger.warning(f"玩家 {user_id} 的mining数据不完整，跳过结算")
                                 continue
                             
-                            # 如果在导航阶段，先结算导航进度
+                            # 处理旧数据中的unloading/returning阶段（现在不应该出现这种情况）
                             phase = mining.get('phase', 'mining')
-                            if phase in ['unloading', 'returning'] and player.get('navigating'):
-                                self.settle_navigation(player)
+                            if phase in ['unloading', 'returning']:
+                                # 强制恢复到mining阶段
+                                mining['phase'] = 'mining'
+                                player['status'] = '挖矿中'
                             
                             volume = self.auto_settle_mining(player)
                             if volume > 0:
@@ -3588,20 +4180,7 @@ class SGDGamePlugin(Star):
                         continue
 
                 if has_changes:
-                    # 保存前先重新加载，合并可能的并发修改
-                    current_data = self.load_players()
-                    for user_id, player in latest_players.items():
-                        if user_id in current_data:
-                            # 更新所有可能有变化的字段
-                            current_data[user_id]['wallet'] = player['wallet']
-                            current_data[user_id]['assets'] = player['assets']
-                            # 更新所有状态字段（包括可能为None的状态）
-                            for field in ['ratting', 'mining', 'manufacturing', 'navigating',
-                                          'status', 'location', 'ship_id', 'next_ship_id']:
-                                if field in player:
-                                    current_data[user_id][field] = player[field]
-                    # 更新内存并保存
-                    self.players = current_data
+                    # 直接保存内存中的数据（已经包含所有修改）
                     self.save_players()
                     logger.info("自动结算完成，数据已保存")
             except Exception as e:
@@ -3655,7 +4234,7 @@ class SGDGamePlugin(Star):
         if escrow["type"] == "item":
             # 物品转移到目标玩家机库
             if system not in target_player['assets']:
-                target_player['assets'][system] = {"minerals": {}, "ores": {}, "ships": []}
+                target_player['assets'][system] = {"minerals": {}, "ores": {}, "ships": [], "salvage": {}}
             
             item_name = escrow["item_name"]
             
@@ -3666,6 +4245,13 @@ class SGDGamePlugin(Star):
                 if item_name not in target_player['assets'][system]['ores']:
                     target_player['assets'][system]['ores'][item_name] = 0
                 target_player['assets'][system]['ores'][item_name] += release_quantity
+            elif item_name in [data['name'] for data in self.RAT_SALVAGE.values()]:
+                # 残骸
+                if 'salvage' not in target_player['assets'][system]:
+                    target_player['assets'][system]['salvage'] = {}
+                if item_name not in target_player['assets'][system]['salvage']:
+                    target_player['assets'][system]['salvage'][item_name] = 0
+                target_player['assets'][system]['salvage'][item_name] += int(release_quantity)
             else:
                 if 'minerals' not in target_player['assets'][system]:
                     target_player['assets'][system]['minerals'] = {}
@@ -3770,7 +4356,12 @@ class SGDGamePlugin(Star):
         item_name = args[0]
         try:
             quantity = float(args[1])
-            price = int(args[2])
+            price = float(args[2])
+            # 价格保留两位小数
+            price = round(price, 2)
+            if price <= 0:
+                yield event.plain_result("❌ 单价必须大于0")
+                return
         except ValueError:
             yield event.plain_result("❌ 数量和单价必须是数字")
             return
@@ -3796,6 +4387,9 @@ class SGDGamePlugin(Star):
         elif item_name in assets.get('minerals', {}):
             available = assets['minerals'][item_name]
             item_type = 'mineral'
+        elif item_name in assets.get('salvage', {}):
+            available = assets['salvage'][item_name]
+            item_type = 'salvage'
         
         if available < quantity:
             yield event.plain_result(f"❌ {item_name} 不足（需要{quantity}，有{available}）")
@@ -3806,10 +4400,14 @@ class SGDGamePlugin(Star):
             assets['ores'][item_name] -= quantity
             if assets['ores'][item_name] <= 0:
                 del assets['ores'][item_name]
-        else:
+        elif item_type == 'mineral':
             assets['minerals'][item_name] -= quantity
             if assets['minerals'][item_name] <= 0:
                 del assets['minerals'][item_name]
+        elif item_type == 'salvage':
+            assets['salvage'][item_name] -= int(quantity)
+            if assets['salvage'][item_name] <= 0:
+                del assets['salvage'][item_name]
         
         escrow_id = self.create_escrow("item", item_name, quantity, user_id)
         
@@ -3849,14 +4447,19 @@ class SGDGamePlugin(Star):
         item_name = args[0]
         try:
             quantity = float(args[1])
-            price = int(args[2])
+            price = float(args[2])
+            # 价格保留两位小数
+            price = round(price, 2)
+            if price <= 0:
+                yield event.plain_result("❌ 单价必须大于0")
+                return
         except ValueError:
             yield event.plain_result("❌ 数量和单价必须是数字")
             return
-        
+
         user_id = str(event.get_sender_id())
         player = self.get_player(user_id)
-        
+
         # 检查是否在吉他空间站
         system = "吉他"
         current_system = player['location'].replace('小行星带', '')
@@ -4041,8 +4644,8 @@ class SGDGamePlugin(Star):
             yield event.plain_result(f"❌ {item_name} 暂无卖单")
             return
         
-        # 按价格升序排序（最低价在前）
-        sell_orders.sort(key=lambda x: x['price'])
+        # 按价格升序排序（最低价在前），同价格按上架时间排序（先上架的先买）
+        sell_orders.sort(key=lambda x: (x['price'], x.get('created_at', 0)))
         
         # 计算总可用数量
         total_available = sum(o['quantity'] for o in sell_orders)
@@ -4188,8 +4791,8 @@ class SGDGamePlugin(Star):
                 quantity = escrow['quantity']  # 使用中介中剩余的数量
                 
                 if system not in player['assets']:
-                    player['assets'][system] = {"minerals": {}, "ores": {}, "ships": []}
-                
+                    player['assets'][system] = {"minerals": {}, "ores": {}, "ships": [], "salvage": {}}
+
                 if order.get('item_type') == 'ore' or item_name in self.ORES_DATA:
                     if 'ores' not in player['assets'][system]:
                         player['assets'][system]['ores'] = {}
