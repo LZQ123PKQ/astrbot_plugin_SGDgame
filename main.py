@@ -329,6 +329,15 @@ class SGDGamePlugin(Star):
                 contract['escrow_id'] = ''
             if 'accepter_id' not in contract:
                 contract['accepter_id'] = None
+            if 'rejected_by' not in contract:
+                contract['rejected_by'] = None
+            if 'total_price' not in contract:
+                # 兼容旧数据，从price和quantity计算
+                contract['total_price'] = contract.get('price', 0) * contract.get('quantity', 0)
+            if 'items' not in contract:
+                contract['items'] = []
+            if 'escrow_ids' not in contract:
+                contract['escrow_ids'] = []
         
         # 更新版本号
         data['data_version'] = self.DATA_VERSION
@@ -5419,15 +5428,14 @@ class SGDGamePlugin(Star):
         # 扣除所有物品，创建中介冻结
         escrow_items = []
         
-        # 扣除原矿
+        # 扣除原矿（先收集再删除，避免遍历时修改字典）
         for item_name, quantity, item_type in items_to_sell:
-            if item_type == 'ore':
-                del assets['ores'][item_name]
-            elif item_type == 'mineral':
-                del assets['minerals'][item_name]
-            elif item_type == 'salvage':
-                del assets['salvage'][item_name]
             escrow_items.append((item_name, quantity, item_type))
+        
+        # 清空原矿、矿物、残骸
+        assets['ores'] = {}
+        assets['minerals'] = {}
+        assets['salvage'] = {}
         
         # 扣除舰船
         for ship in ships_to_sell:
