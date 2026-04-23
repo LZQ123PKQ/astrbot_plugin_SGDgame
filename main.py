@@ -31,9 +31,13 @@ class SGDGamePlugin(Star):
         self.escrow_file = os.path.join(self.data_dir, "escrow.json")
         self.market_data = self.load_market()
         self.escrow_data = self.load_escrow()
+        # 合同系统数据文件
+        self.contract_file = os.path.join(self.data_dir, "contracts.json")
+        self.contract_data = self.load_contracts()
         # ID生成计数器，避免时间戳冲突
         self._order_id_counter = 0
         self._escrow_id_counter = 0
+        self._contract_id_counter = 0
         # 启动自动结算任务
         self.ratting_settle_task = asyncio.create_task(self._ratting_auto_settle_loop())
         logger.info(f"星际黎明插件已加载 (版本: {PLUGIN_VERSION})")
@@ -55,6 +59,15 @@ class SGDGamePlugin(Star):
         import string
         random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
         return f"ESC{random_part}"
+
+    def _generate_contract_id(self) -> str:
+        """生成唯一的合同ID（短格式）"""
+        self._contract_id_counter += 1
+        # 使用短格式：CNT + 6位随机字母数字
+        import random
+        import string
+        random_part = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        return f"CNT{random_part}"
 
     async def terminate(self):
         """插件被卸载/停用时会调用"""
@@ -264,6 +277,70 @@ class SGDGamePlugin(Star):
             self.escrow_data['data_version'] = self.ESCROW_DATA_VERSION
         with open(self.escrow_file, 'w', encoding='utf-8') as f:
             json.dump(self.escrow_data, f, ensure_ascii=False, indent=2)
+
+    def load_contracts(self) -> Dict:
+        """加载合同数据，自动迁移旧版本数据"""
+        if os.path.exists(self.contract_file):
+            with open(self.contract_file, 'r', encoding='utf-8') as f:
+                data = json.load(f)
+                return self._migrate_contract_data(data)
+        return {"contracts": {}, "data_version": self.DATA_VERSION}
+
+    def _migrate_contract_data(self, data: Dict) -> Dict:
+        """迁移合同数据到最新版本"""
+        # 确保版本号字段存在
+        if 'data_version' not in data:
+            data['data_version'] = "0.0.0"
+        elif isinstance(data['data_version'], int):
+            data['data_version'] = f"1.{data['data_version']}.0"
+        
+        # 确保contracts字段存在
+        if 'contracts' not in data:
+            data['contracts'] = {}
+        
+        # 验证每个合同的结构完整性
+        for contract_id, contract in list(data['contracts'].items()):
+            if not isinstance(contract, dict):
+                continue
+            
+            if 'contract_id' not in contract:
+                contract['contract_id'] = contract_id
+            if 'type' not in contract:
+                contract['type'] = 'public'  # public/private
+            if 'item_name' not in contract:
+                contract['item_name'] = '未知物品'
+            if 'item_type' not in contract:
+                contract['item_type'] = 'mineral'
+            if 'quantity' not in contract:
+                contract['quantity'] = 0
+            if 'price' not in contract:
+                contract['price'] = 0
+            if 'creator_id' not in contract:
+                contract['creator_id'] = ''
+            if 'target_id' not in contract:
+                contract['target_id'] = None  # None表示公开合同
+            if 'system' not in contract:
+                contract['system'] = '吉他'
+            if 'status' not in contract:
+                contract['status'] = 'active'  # active/completed/cancelled/expired
+            if 'created_at' not in contract:
+                contract['created_at'] = time.time()
+            if 'escrow_id' not in contract:
+                contract['escrow_id'] = ''
+            if 'accepter_id' not in contract:
+                contract['accepter_id'] = None
+        
+        # 更新版本号
+        data['data_version'] = self.DATA_VERSION
+        return data
+
+    def save_contracts(self):
+        """保存合同数据"""
+        # 确保版本号存在
+        if 'data_version' not in self.contract_data:
+            self.contract_data['data_version'] = self.DATA_VERSION
+        with open(self.contract_file, 'w', encoding='utf-8') as f:
+            json.dump(self.contract_data, f, ensure_ascii=False, indent=2)
 
     def get_player(self, user_id: str) -> Dict:
         """获取玩家数据，单角色模式，自动初始化新玩家"""
@@ -811,6 +888,20 @@ class SGDGamePlugin(Star):
 /游戏取消订单 <订单ID> - 取消指定订单
 /游戏购买 <物品名> [数量] - 自动购买该物品的最低价卖单
 
+📜 合同系统：
+/游戏合同 - 查看合同列表（包括自己发布的和可接受的）
+/游戏合同 <合同ID> - 查看指定合同详情
+/游戏创建合同 <物品名> <数量> <单价> - 创建公开合同（任何人可接受）
+/游戏创建合同 <物品名> <数量> <单价> <目标玩家> - 创建定向合同（仅指定玩家可接受）
+/游戏接受合同 <合同ID> - 接受合同并支付货款
+/游戏取消合同 <合同ID> - 取消自己发布的合同，物品返还机库
+
+💡 合同说明：
+• 公开合同：任何人都可以查看和接受
+• 定向合同：只有指定的玩家可以接受
+• 创建合同时物品会被冻结在中介
+• 接受合同时需要支付货款，物品立即转移
+
 输入 /游戏注册 开始游戏！"""
             yield event.plain_result(help_text)
             logger.info("帮助信息已发送")
@@ -1010,7 +1101,21 @@ class SGDGamePlugin(Star):
         if player.get('ratting'):
             ratting = player['ratting']
             duration = time.time() - ratting['start_time']
-            status_text += f"\n\n👾 刷怪中...\n  地点：{ratting['system']} {self.RAT_DATA[ratting['level']]['name']}\n  已进行：{duration/60:.1f}分钟"
+            level = ratting['level']
+            rat_data = self.RAT_DATA[level]
+            
+            # 计算已完成的异常数量
+            ship_dps = self.SHIPS_DATA.get(ratting['ship_name'], {}).get('dps', 0)
+            kill_time = rat_data['hp'] / ship_dps if ship_dps > 0 else 0
+            repair_delay = self.REPAIR_DELAY.get(ratting['ship_name'], 45)
+            cycle_time = kill_time + repair_delay
+            
+            elapsed_since_last = time.time() - ratting['last_settle_time']
+            completed_cycles = int(ratting.get('total_bounty', 0) / rat_data['bounty'])
+            current_cycle_progress = int(elapsed_since_last / cycle_time) if cycle_time > 0 else 0
+            total_cycles = completed_cycles + current_cycle_progress
+            
+            status_text += f"\n\n👾 刷怪中...\n  地点：{ratting['system']} {rat_data['name']}\n  已完成：{completed_cycles}个异常\n  已进行：{duration/60:.1f}分钟  收益¥{ratting.get('total_bounty', 0):,}"
 
         if player.get('navigating'):
             nav = player['navigating']
@@ -4819,3 +4924,403 @@ class SGDGamePlugin(Star):
         self.save_players()
         
         yield event.plain_result(f"✅ 订单已取消\n📋 ID: {order_id}\n📦 {order['item_name']} ×{order['quantity']}\n💰 冻结的{'物品' if order['type'] == 'sell' else '货币'}已返还")
+
+    # ========== 合同系统 ==========
+    @filter.command("游戏合同")
+    async def list_contracts(self, event: AstrMessageEvent):
+        """查看合同列表"""
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+        
+        args = event.message_str.split()[1:]
+        
+        # 获取所有活跃合同
+        contracts = self.contract_data.get('contracts', {})
+        active_contracts = []
+        my_contracts = []
+        
+        for contract_id, contract in contracts.items():
+            if contract.get('status') != 'active':
+                continue
+            
+            # 检查是否是创建者的合同
+            if contract.get('creator_id') == user_id:
+                my_contracts.append(contract)
+            # 检查是否可以接受（公开合同或定向给当前用户）
+            elif contract.get('type') == 'public' or contract.get('target_id') == user_id:
+                active_contracts.append(contract)
+        
+        # 如果有参数，查看特定合同的详情
+        if len(args) >= 1:
+            contract_id = args[0]
+            if contract_id not in contracts:
+                yield event.plain_result(f"❌ 合同 {contract_id} 不存在")
+                return
+            
+            contract = contracts[contract_id]
+            text = f"📋 合同详情\n\n"
+            text += f"ID: {contract_id}\n"
+            text += f"类型：{'公开合同' if contract.get('type') == 'public' else '定向合同'}\n"
+            text += f"物品：{contract.get('item_name')} ×{contract.get('quantity')}\n"
+            text += f"单价：¥{contract.get('price', 0):,}\n"
+            text += f"总价：¥{contract.get('price', 0) * contract.get('quantity', 0):,}\n"
+            text += f"地点：{contract.get('system', '吉他')}\n"
+            text += f"状态：{contract.get('status', 'unknown')}\n"
+            
+            creator = self.players.get(contract.get('creator_id', ''), {})
+            text += f"发布人：{creator.get('name', '未知')}\n"
+            
+            if contract.get('target_id'):
+                target = self.players.get(contract.get('target_id', ''), {})
+                text += f"指定对象：{target.get('name', '未知')}\n"
+            
+            yield event.plain_result(text)
+            return
+        
+        # 显示合同列表
+        text = "📋 合同列表\n\n"
+        
+        # 显示我发布的合同
+        if my_contracts:
+            text += "【我发布的合同】\n"
+            for contract in my_contracts[:5]:
+                contract_type = "公开" if contract.get('type') == 'public' else "定向"
+                text += f"  {contract['contract_id']} {contract['item_name']}×{contract['quantity']} ¥{contract['price']:,}/单位 ({contract_type})\n"
+            if len(my_contracts) > 5:
+                text += f"  ...还有{len(my_contracts) - 5}个\n"
+            text += "\n"
+        
+        # 显示可接受的合同
+        if active_contracts:
+            text += "【可接受的合同】\n"
+            for contract in active_contracts[:5]:
+                creator = self.players.get(contract.get('creator_id', ''), {})
+                creator_name = creator.get('name', '未知')
+                contract_type = "公开" if contract.get('type') == 'public' else "定向给你"
+                text += f"  {contract['contract_id']} {contract['item_name']}×{contract['quantity']} ¥{contract['price']:,}/单位 ({contract_type})\n"
+                text += f"    发布人：{creator_name}\n"
+            if len(active_contracts) > 5:
+                text += f"  ...还有{len(active_contracts) - 5}个\n"
+        else:
+            text += "暂无可用合同\n"
+        
+        text += "\n使用 /游戏合同 <合同ID> 查看详情\n"
+        text += "使用 /游戏创建合同 创建新合同"
+        yield event.plain_result(text)
+
+    @filter.command("游戏创建合同")
+    async def create_contract(self, event: AstrMessageEvent):
+        """创建合同
+        用法：
+        /游戏创建合同 <物品名> <数量> <单价> - 创建公开合同
+        /游戏创建合同 <物品名> <数量> <单价> <目标玩家> - 创建定向合同
+        """
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+        
+        args = event.message_str.split()[1:]
+        
+        if len(args) < 3:
+            yield event.plain_result(
+                "❌ 用法：\n"
+                "/游戏创建合同 <物品名> <数量> <单价> - 创建公开合同\n"
+                "/游戏创建合同 <物品名> <数量> <单价> <目标玩家> - 创建定向合同"
+            )
+            return
+        
+        item_name = args[0]
+        try:
+            quantity = float(args[1])
+            price = float(args[2])
+            if quantity <= 0 or price < 0:
+                yield event.plain_result("❌ 数量和单价必须大于0")
+                return
+        except ValueError:
+            yield event.plain_result("❌ 数量和单价必须是数字")
+            return
+        
+        # 检查是否在空间站
+        system = player['location'].replace('小行星带', '')
+        if system not in self.NPC_STATIONS:
+            yield event.plain_result(f"❌ 必须在空间站才能创建合同（当前在{system}）")
+            return
+        
+        # 确定合同类型和目标
+        target_id = None
+        contract_type = 'public'
+        
+        if len(args) >= 4:
+            # 定向合同
+            target_name = args[3]
+            contract_type = 'private'
+            
+            # 查找目标玩家
+            found = False
+            for uid, p in self.players.items():
+                if p.get('name') == target_name:
+                    target_id = uid
+                    found = True
+                    break
+            
+            if not found:
+                yield event.plain_result(f"❌ 未找到玩家 '{target_name}'")
+                return
+            
+            if target_id == user_id:
+                yield event.plain_result("❌ 不能给自己创建定向合同")
+                return
+        
+        # 检查物品是否存在
+        assets = player['assets'].get(system, {})
+        available = 0
+        item_type = None
+        
+        if item_name in assets.get('ores', {}):
+            available = assets['ores'][item_name]
+            item_type = 'ore'
+        elif item_name in assets.get('minerals', {}):
+            available = assets['minerals'][item_name]
+            item_type = 'mineral'
+        elif item_name in assets.get('salvage', {}):
+            available = assets['salvage'][item_name]
+            item_type = 'salvage'
+        elif item_name in self.SHIPS_DATA:
+            # 检查是否有该舰船
+            for ship in assets.get('ships', []):
+                if ship['name'] == item_name:
+                    # 检查舰船是否为空（没有货物）
+                    if not ship.get('cargo') and not ship.get('ore_hold'):
+                        available = 1
+                        item_type = 'ship'
+                        ship_data = ship
+                        break
+        
+        if available < quantity:
+            yield event.plain_result(f"❌ {item_name} 不足（需要{quantity}，有{available}）")
+            return
+        
+        if item_type == 'ship' and quantity != 1:
+            yield event.plain_result("❌ 舰船合同一次只能交易1艘")
+            return
+        
+        # 扣除物品，创建中介冻结
+        if item_type == 'ore':
+            assets['ores'][item_name] -= quantity
+            if assets['ores'][item_name] <= 0:
+                del assets['ores'][item_name]
+        elif item_type == 'mineral':
+            assets['minerals'][item_name] -= quantity
+            if assets['minerals'][item_name] <= 0:
+                del assets['minerals'][item_name]
+        elif item_type == 'salvage':
+            assets['salvage'][item_name] -= int(quantity)
+            if assets['salvage'][item_name] <= 0:
+                del assets['salvage'][item_name]
+        elif item_type == 'ship':
+            assets['ships'].remove(ship_data)
+        
+        escrow_id = self.create_escrow("item", item_name, quantity, user_id)
+        
+        # 创建合同
+        contract_id = self._generate_contract_id()
+        contract = {
+            "contract_id": contract_id,
+            "type": contract_type,
+            "item_type": item_type,
+            "item_name": item_name,
+            "quantity": quantity,
+            "price": price,
+            "creator_id": user_id,
+            "target_id": target_id,
+            "system": system,
+            "status": "active",
+            "created_at": time.time(),
+            "escrow_id": escrow_id,
+            "accepter_id": None
+        }
+        
+        if 'contracts' not in self.contract_data:
+            self.contract_data['contracts'] = {}
+        self.contract_data['contracts'][contract_id] = contract
+        
+        self.save_contracts()
+        self.save_players()
+        
+        total_price = int(price * quantity)
+        text = f"✅ 合同创建成功\n\n"
+        text += f"ID: {contract_id}\n"
+        text += f"类型：{'公开合同' if contract_type == 'public' else '定向合同'}\n"
+        text += f"物品：{item_name} ×{quantity}\n"
+        text += f"单价：¥{price:,}\n"
+        text += f"总价：¥{total_price:,}\n"
+        text += f"地点：{system}\n"
+        
+        if target_id:
+            target = self.players.get(target_id, {})
+            text += f"指定对象：{target.get('name', '未知')}\n"
+        
+        text += f"\n物品已冻结在中介，等待对方接受"
+        yield event.plain_result(text)
+
+    @filter.command("游戏接受合同")
+    async def accept_contract(self, event: AstrMessageEvent):
+        """接受合同"""
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+        
+        args = event.message_str.split()[1:]
+        
+        if len(args) < 1:
+            yield event.plain_result("❌ 用法：/游戏接受合同 <合同ID>")
+            return
+        
+        contract_id = args[0]
+        
+        if contract_id not in self.contract_data.get('contracts', {}):
+            yield event.plain_result(f"❌ 合同 {contract_id} 不存在")
+            return
+        
+        contract = self.contract_data['contracts'][contract_id]
+        
+        # 检查合同状态
+        if contract.get('status') != 'active':
+            yield event.plain_result(f"❌ 合同 {contract_id} 已{contract.get('status', '失效')}")
+            return
+        
+        # 检查是否是自己的合同
+        if contract.get('creator_id') == user_id:
+            yield event.plain_result("❌ 不能接受自己发布的合同")
+            return
+        
+        # 检查是否有权限接受（公开合同或定向给自己）
+        if contract.get('type') == 'private' and contract.get('target_id') != user_id:
+            yield event.plain_result("❌ 这是定向合同，只有指定对象可以接受")
+            return
+        
+        # 检查钱包余额
+        total_price = int(contract.get('price', 0) * contract.get('quantity', 0))
+        if player['wallet'] < total_price:
+            yield event.plain_result(f"❌ 余额不足（需要¥{total_price:,}，有¥{player['wallet']:,}）")
+            return
+        
+        # 检查是否在正确星系
+        system = contract.get('system', '吉他')
+        current_system = player['location'].replace('小行星带', '')
+        if current_system != system:
+            yield event.plain_result(f"❌ 必须在{system}空间站才能接受此合同")
+            return
+        
+        # 执行交易
+        creator_id = contract.get('creator_id', '')
+        creator = self.get_player(creator_id)
+        
+        # 扣除买方货币
+        player['wallet'] -= total_price
+        
+        # 释放卖方的物品中介到买方
+        self.release_escrow(contract['escrow_id'], user_id, system, contract.get('quantity', 0))
+        
+        # 给卖方钱包加钱
+        creator['wallet'] += total_price
+        
+        # 更新合同状态
+        contract['status'] = 'completed'
+        contract['accepter_id'] = user_id
+        
+        self.save_contracts()
+        self.save_players()
+        
+        text = f"✅ 合同已接受\n\n"
+        text += f"ID: {contract_id}\n"
+        text += f"物品：{contract.get('item_name')} ×{contract.get('quantity')}\n"
+        text += f"花费：¥{total_price:,}\n"
+        text += f"物品已存入{system}机库"
+        yield event.plain_result(text)
+        
+        logger.info(f"合同成交：{contract_id}，{creator_id} -> {user_id}")
+
+    @filter.command("游戏取消合同")
+    async def cancel_contract(self, event: AstrMessageEvent):
+        """取消自己发布的合同"""
+        user_id = str(event.get_sender_id())
+        player = self.get_player(user_id)
+        
+        args = event.message_str.split()[1:]
+        
+        if len(args) < 1:
+            yield event.plain_result("❌ 用法：/游戏取消合同 <合同ID>")
+            return
+        
+        contract_id = args[0]
+        
+        if contract_id not in self.contract_data.get('contracts', {}):
+            yield event.plain_result(f"❌ 合同 {contract_id} 不存在")
+            return
+        
+        contract = self.contract_data['contracts'][contract_id]
+        
+        # 检查是否是创建者
+        if contract.get('creator_id') != user_id:
+            yield event.plain_result("❌ 只能取消自己发布的合同")
+            return
+        
+        # 检查合同状态
+        if contract.get('status') != 'active':
+            yield event.plain_result(f"❌ 合同已{contract.get('status', '失效')}")
+            return
+        
+        # 返还中介冻结的物品
+        system = contract.get('system', '吉他')
+        escrow = self.escrow_data.get(contract['escrow_id'])
+        
+        if escrow and escrow['status'] == 'frozen':
+            item_name = contract.get('item_name', '')
+            quantity = escrow.get('quantity', 0)
+            item_type = contract.get('item_type', 'mineral')
+            
+            if system not in player['assets']:
+                player['assets'][system] = {"minerals": {}, "ores": {}, "ships": [], "salvage": {}}
+            
+            if item_type == 'ore':
+                if 'ores' not in player['assets'][system]:
+                    player['assets'][system]['ores'] = {}
+                if item_name not in player['assets'][system]['ores']:
+                    player['assets'][system]['ores'][item_name] = 0
+                player['assets'][system]['ores'][item_name] += quantity
+            elif item_type == 'mineral':
+                if 'minerals' not in player['assets'][system]:
+                    player['assets'][system]['minerals'] = {}
+                if item_name not in player['assets'][system]['minerals']:
+                    player['assets'][system]['minerals'][item_name] = 0
+                player['assets'][system]['minerals'][item_name] += quantity
+            elif item_type == 'salvage':
+                if 'salvage' not in player['assets'][system]:
+                    player['assets'][system]['salvage'] = {}
+                if item_name not in player['assets'][system]['salvage']:
+                    player['assets'][system]['salvage'][item_name] = 0
+                player['assets'][system]['salvage'][item_name] += int(quantity)
+            elif item_type == 'ship':
+                # 返还舰船
+                ship_data = {
+                    "id": player['next_ship_id'],
+                    "name": item_name,
+                    "hp_percent": 100,
+                    "cargo": {},
+                    "ore_hold": {}
+                }
+                player['assets'][system]['ships'].append(ship_data)
+                player['next_ship_id'] += 1
+            
+            escrow['status'] = 'cancelled'
+            self.save_escrow()
+        
+        # 更新合同状态
+        contract['status'] = 'cancelled'
+        self.save_contracts()
+        self.save_players()
+        
+        yield event.plain_result(
+            f"✅ 合同已取消\n"
+            f"ID: {contract_id}\n"
+            f"物品已返还到{system}机库"
+        )
