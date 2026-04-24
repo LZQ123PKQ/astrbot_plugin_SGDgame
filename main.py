@@ -1610,8 +1610,12 @@ class SGDGamePlugin(Star):
         text += "\n使用 /游戏仓库 <星系> 查看详细材料"
         yield event.plain_result(text)
 
-    def _get_cargo_volume(self, cargo: Dict) -> float:
+    def _get_cargo_volume(self, cargo) -> float:
         """计算货柜当前使用体积"""
+        # 如果 cargo 不是字典（可能是整数容量），返回 0
+        if not isinstance(cargo, dict):
+            return 0.0
+        
         total_volume = 0
         for item_type, items in cargo.items():
             if item_type == '舰船':
